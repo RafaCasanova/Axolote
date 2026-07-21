@@ -1,6 +1,6 @@
 # Backend Axolote
 
-**Axolote** é um framework HTTP e WebSocket construído com ausência de dependências de terceiros; a arquitetura não utiliza o Cargo ou crates externas.
+**Axolote** é um framework HTTP e WebSocket escrito em Rust sem dependências externas (sem o uso de Cargo ou crates de terceiros).
 
 Toda a fundação técnica — roteamento, análise de requisições, logging, parsing, concorrência e o protocolo WebSocket (incluindo clustering S2S) — foi escrita utilizando estritamente a biblioteca padrão do Rust (`std`).
 

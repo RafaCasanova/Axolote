@@ -8,7 +8,7 @@ A arquitetura de cluster e totalmente opcional (modo Standalone por padrao). Qua
 
 ## 1. Arquitetura do Cluster (Gossip Node Mesh)
 
-O cluster baseia-se em uma topologia em malha descentralizada (*Gossip Protocol*). Os servidores conectam-se utilizando sockets TCP S2S dedicados e retransmitem informações de forma viral e inteligente.
+O cluster baseia-se em uma topologia em malha (*Gossip Protocol*). Os servidores conectam-se utilizando sockets TCP S2S dedicados e retransmitem as informações entre os nós.
 
 ```
        ┌──────────────┐         (Relay)          ┌──────────────┐
@@ -31,8 +31,8 @@ O cluster baseia-se em uma topologia em malha descentralizada (*Gossip Protocol*
 
 ### Mecanismos de Funcionamento
 
-* **Roteamento em Malha (Gossip Relay):** Diferente de uma topologia estrela convencional, quando um servidor recebe uma mensagem inédita de um vizinho (ex: Node 1 para Node 2), ele processa a mensagem para seus clientes locais e **retransmite-a automaticamente para todos os seus outros vizinhos** (ex: Node 2 para Node 3). Isso garante que, independente de quantos servidores estejam conectados e de quais as rotas disponíveis, a mensagem "inunda" a rede de forma rápida, contornando gargalos ou rotas caídas, provendo **Garantia de Entrega**.
-* **Deduplicação de Mensagens Anti-Loop:** Como o protocolo Gossip propaga em todas as direções simultaneamente, mensagens inevitavelmente cruzarão os mesmos servidores multiplas vezes (Loops). O *axolote* resolve isso implementando um *Cache LIFO de Deduplicação* O(1) de altíssimo desempenho, mantendo a assinatura das últimas 100.000 mensagens recebidas em memória `(Node Original, Número Sequencial)`. A tentativa de loop é esmagada instantaneamente ao colidir na borda do cache.
+* **Roteamento em Malha (Gossip Relay):** Quando um servidor recebe uma mensagem inédita de um vizinho (ex: Node 1 para Node 2), ele processa a mensagem para seus clientes locais e retransmite-a para todos os seus outros vizinhos (ex: Node 2 para Node 3). Isso permite que as mensagens sejam propagadas pela rede entre os nós disponíveis.
+* **Deduplicação de Mensagens Anti-Loop:** Como o protocolo Gossip propaga em todas as direções, mensagens podem cruzar os mesmos servidores múltiplas vezes. O *axolote* utiliza um *Cache LIFO de Deduplicação* O(1), mantendo a assinatura das últimas 100.000 mensagens recebidas em memória `(Node Original, Número Sequencial)` para ignorar mensagens duplicadas.
 * **Leader-per-Room (Líder por Sala):** Cada sala criada dinamicamente no WebSocket possui um nó "líder". O primeiro nó que registra a presença local em uma sala é eleito o líder dela, facilitando rotas.
 * **Autodiscovery & Heartbeat:** Os nós utilizam heartbeats periódicos (Ping/Pong S2S) para validar a conexão direta. Se um nó for detectado como morto, os demais reelegem a liderança das salas afetadas e fecham o peer defeituoso.
 

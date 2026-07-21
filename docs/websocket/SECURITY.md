@@ -20,7 +20,7 @@ Ele permite barrar conexões maliciosas, não autorizadas ou incompatíveis logo
    - Tokens em Cabeçalhos (Ex: `Authorization: Bearer XYZ`)
 
 5. **Validador Customizado Dinâmico (`custom_validator`)**:
-   Um gancho (hook) poderoso. Você pode passar uma *closure* que inspeciona a estrutura `HttpRequest` original por completo, podendo extrair *Cookies*, validar JWTs na mão, ou verificar IPs através dos cabeçalhos de *Proxy* (ex: `X-Forwarded-For`).
+   Permite definir uma *closure* para inspecionar a estrutura `HttpRequest` original, podendo extrair *Cookies*, validar JWTs ou verificar IPs através de cabeçalhos de *Proxy* (ex: `X-Forwarded-For`).
 
 ---
 
@@ -72,4 +72,4 @@ fn main() {
 }
 ```
 
-O código nativo do servidor lidará com os cenários gerando os respectivos retornos HTTP (400 Bad Request, 401 Unauthorized, 403 Forbidden) garantindo extrema segurança para seus túneis de conexão assíncrona.
+O código do servidor lidará com os cenários gerando os respectivos retornos HTTP (400 Bad Request, 401 Unauthorized, 403 Forbidden).

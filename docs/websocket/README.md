@@ -1,18 +1,18 @@
 # Documentação do Módulo WebSocket
 
-O módulo WebSocket do `axolote` fornece uma implementação robusta e integral da RFC 6455 (WebSocket Protocol). Assim como o restante do framework, este módulo não possui dependências externas, processando handshakes, máscaras criptográficas (XOR) e frames binários estritamente via operações nativas.
+O módulo WebSocket do `axolote` fornece a implementação da RFC 6455 (WebSocket Protocol). Este módulo não possui dependências externas, processando handshakes, máscaras criptográficas (XOR) e frames binários via operações da biblioteca padrão.
 
 ## 1. Topologia e Gerenciamento de Estado
 
 O sistema baseia-se num paradigma orientado a Hub (`WsHub`), que atua como centralizador de estado O(1) e roteador de mensagens entre conexões simultâneas. 
 
-Diferente de implementações triviais que utilizam Mutexes globais, o `WsHub` utiliza um sistema de particionamento (Sharding) interno, reduzindo drasticamente a contenção (lock contention) e provendo vazão de dados para milhares de conexões paralelas.
+O `WsHub` utiliza um sistema de particionamento (Sharding) interno para redução de contenção (lock contention) entre conexões paralelas.
 
 ## 2. Implementação e Roteamento de Handlers
 
 Rotas WebSocket são vinculadas à estrutura principal do servidor utilizando a função `add_ws_route`. 
 
-Diferentemente do modelo Request-Response, a comunicação WebSocket é mantida por um ciclo de vida perene no formato `fn(WsConnection, WsHub)`. O manipulador monopoliza a thread enquanto a conexão permanecer ativa.
+A comunicação WebSocket é mantida por um ciclo de vida no formato `fn(WsConnection, WsHub)`. O manipulador executa enquanto a conexão permanecer ativa.
 
 ```rust
 extern crate axolote;
@@ -87,14 +87,14 @@ if let Some(user) = conn.get_metadata("username") {
 
 ## 5. Arquitetura Distribuída e Clusterização (S2S)
 
-O módulo provê capacidades avançadas de interconexão topológica (Node Mesh Cluster). Quando o modo cluster está ativado, a comunicação e o roteamento das salas rompem as barreiras do servidor local, espalhando-se transparentemente entre todos os nós instanciados numa arquitetura distribuída.
+O módulo provê suporte a interconexão topológica (Node Mesh Cluster). Quando o modo cluster está ativado, a comunicação e o roteamento de salas são propagados entre os nós conectados.
 
-A expansão de escalabilidade horizontal baseada em Protocolo Gossip (Malha Inundada), bem como seu cache estrutural anti-loop e estratégias de eleição de liderança, estão detalhados no guia dedicado.
+A expansão em malha baseada no protocolo Gossip, bem como o cache de deduplicação e controle de liderança, estão detalhados no guia dedicado.
 
 **Leia a Especificação Completa do Cluster:** [Documentação de Cluster (CLUSTER.md)](CLUSTER.md)
 
 ## 6. Módulo de Segurança (Handshake Security)
 
-O módulo WebSocket possui um escudo de proteção atrelado à fase de *Upgrade HTTP*, permitindo barrar conexões maliciosas via validação estrita da RFC, mitigação de CSWSH (Verificação de Origin) e sistemas dinâmicos de autenticação via Token (Header e Query String).
+O módulo WebSocket possui um sistema de validação atrelado à fase de *Upgrade HTTP*, permitindo checar requisições via validação da RFC, verificação de Origin (CSWSH) e autenticação via Token (Header e Query String).
 
 **Aprenda a proteger suas rotas WS:** [Documentação de Segurança (SECURITY.md)](SECURITY.md)

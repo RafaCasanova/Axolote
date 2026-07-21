@@ -1,6 +1,6 @@
 # Documentação do Módulo HTTP
 
-O módulo HTTP do `axolote` foi arquitetado para prover roteamento de alto desempenho e tratamento de requisições de forma puramente nativa. A estrutura baseia-se na thread pool nativa do sistema operacional, processando conexões de forma concorrente.
+O módulo HTTP do `axolote` provê roteamento e tratamento de requisições sem dependências externas. A estrutura baseia-se na thread pool do sistema operacional, processando conexões de forma concorrente.
 
 ## 1. Instanciação e Concorrência
 
@@ -16,7 +16,7 @@ fn main() {
 }
 ```
 
-O servidor abstrai as complexidades de alocação multithreading. Internamente, instâncias da configuração de rotas são propagadas via `Arc` (Atomic Reference Counting) para permitir acesso paralelo seguro e sem contenção, dispensando o uso de locks pesados de leitura nas rotas estáticas.
+Internamente, instâncias da configuração de rotas são propagadas via `Arc` (Atomic Reference Counting) para permitir acesso paralelo seguro.
 
 ## 2. Roteamento e Manipuladores de Requisição
 
