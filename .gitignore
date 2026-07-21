@@ -1,0 +1,19 @@
+# Binários compilados
+main
+main.exe
+*.o
+*.d
+
+# Diretórios do sistema
+.DS_Store
+Thumbs.db
+
+# IDEs e editores
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
