@@ -1,6 +1,6 @@
 # Backend Axolote
 
-**Axolote** é um framework HTTP e WebSocket construído do zero na linguagem Rust. Seu principal diferencial é a ausência de dependências de terceiros; a arquitetura não utiliza o Cargo ou crates externas.
+**Axolote** é um framework HTTP e WebSocket construído com ausência de dependências de terceiros; a arquitetura não utiliza o Cargo ou crates externas.
 
 Toda a fundação técnica — roteamento, análise de requisições, logging, parsing, concorrência e o protocolo WebSocket (incluindo clustering S2S) — foi escrita utilizando estritamente a biblioteca padrão do Rust (`std`).
 
@@ -55,6 +55,19 @@ Se o seu projeto de destino utilizar o Cargo, você pode automatizar a linkagem 
 1. Copie o arquivo `libaxolote.rlib` e também o arquivo **`build.rs`** deste repositório para a raiz do seu projeto Cargo (ao lado do seu `Cargo.toml`).
 2. Adicione `extern crate axolote;` no seu `main.rs`.
 3. Rode `cargo build` ou `cargo run` normalmente. O arquivo `build.rs` instruirá o Cargo a encontrar e anexar a biblioteca pré-compilada automaticamente.
+
+## Exemplos e Documentação Detalhada
+
+Para conferir guias completos de arquitetura, tutoriais passo a passo e códigos de exemplo prontos para execução, consulte os diretórios dentro da pasta [`docs/`](docs/):
+
+- **Módulo HTTP**:
+  - [Guia e Documentação HTTP](docs/http/README.md)
+  - [Exemplos de Código HTTP](docs/http/examples/)
+- **Módulo WebSocket**:
+  - [Guia e Documentação WebSocket](docs/websocket/README.md)
+  - [Módulo de Segurança WebSocket](docs/websocket/SECURITY.md)
+  - [Arquitetura de Cluster e Gossip Mesh](docs/websocket/CLUSTER.md)
+  - [Exemplos de Código WebSocket](docs/websocket/examples/)
 
 ## Licença
 
