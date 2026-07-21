@@ -1,5 +1,6 @@
 pub mod http;
 pub mod logger;
+pub mod reactor;
 pub mod route;
 pub mod route_group;
 pub mod thread_pool;
