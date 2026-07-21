@@ -24,10 +24,27 @@ impl Default for WsRouteConfig {
     fn default() -> Self {
         WsRouteConfig {
             max_message_size: 65536, // 64KB padrão
-            ping_interval_secs: None, // Heartbeat desligado por padrão
-            pong_timeout_secs: None,
+            ping_interval_secs: Some(30), // Heartbeat padrão a cada 30s
+            pong_timeout_secs: Some(10),  // 10s para timeout do pong
             security: None,
         }
+    }
+}
+
+impl WsRouteConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_max_message_size(mut self, size: usize) -> Self {
+        self.max_message_size = size;
+        self
+    }
+
+    pub fn with_heartbeat(mut self, ping_interval_secs: u64, pong_timeout_secs: u64) -> Self {
+        self.ping_interval_secs = Some(ping_interval_secs);
+        self.pong_timeout_secs = Some(pong_timeout_secs);
+        self
     }
 }
 
