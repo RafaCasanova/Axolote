@@ -1,11 +1,12 @@
 extern crate axolote;
-use axolote::prelude::*;
+use axolote::Server;
+use axolote::http::{HttpMethod, HttpRequest, HttpResponse};
 
 fn search_handler(req: HttpRequest) -> HttpResponse {
     let termo = req.query_params.get("q").cloned().unwrap_or_else(|| "Nenhum".to_string());
     let limite = req.query_params.get("limite").cloned().unwrap_or_else(|| "10".to_string());
 
-    HttpResponse::ok(&format!(
+    HttpResponse::ok(format!(
         "Resultado da busca pelo termo: '{}' (Limite: {})", 
         termo, limite
     ))

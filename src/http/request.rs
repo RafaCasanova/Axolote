@@ -31,7 +31,9 @@ impl HttpRequest {
             let mut qp = HashMap::new();
             for pair in query_string.split('&') {
                 if let Some((key, value)) = pair.split_once('=') {
-                    qp.insert(key.to_string(), value.to_string());
+                    qp.insert(Self::url_decode(key), Self::url_decode(value));
+                } else if !pair.is_empty() {
+                    qp.insert(Self::url_decode(pair), String::new());
                 }
             }
             (p, qp)
@@ -83,5 +85,52 @@ impl HttpRequest {
             headers: mem::take(&mut self.headers),
             body: mem::take(&mut self.body),
         }
+    }
+
+    /// Remove o corpo da requisição
+    pub fn take_body(&mut self) -> String {
+        std::mem::take(&mut self.body)
+    }
+
+
+
+    /// Processa o corpo da requisição como Form Data (application/x-www-form-urlencoded)
+    pub fn form_data(&self) -> HashMap<String, String> {
+        let mut form = HashMap::new();
+        for pair in self.body.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                form.insert(Self::url_decode(k), Self::url_decode(v));
+            } else if !pair.is_empty() {
+                form.insert(Self::url_decode(pair), String::new());
+            }
+        }
+        form
+    }
+
+    /// Decodifica strings URL Encoded (ex: %20 -> espaço, + -> espaço)
+    pub fn url_decode(input: &str) -> String {
+        let mut out = Vec::new();
+        let bytes = input.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'+' {
+                out.push(b' ');
+                i += 1;
+            } else if bytes[i] == b'%' && i + 2 < bytes.len() {
+                let hex = std::str::from_utf8(&bytes[i + 1..=i + 2]).unwrap_or("");
+                if let Ok(b) = u8::from_str_radix(hex, 16) {
+                    out.push(b);
+                } else {
+                    out.push(b'%');
+                    out.push(bytes[i + 1]);
+                    out.push(bytes[i + 2]);
+                }
+                i += 3;
+            } else {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+        String::from_utf8_lossy(&out).into_owned()
     }
 }

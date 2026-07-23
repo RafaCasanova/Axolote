@@ -1,5 +1,6 @@
 extern crate axolote;
-use axolote::prelude::*;
+use axolote::Server;
+use axolote::ws::{WsConnection, WsMode, WsMessage, WsHub};
 
 fn chat_handler(mut conn: WsConnection, hub: WsHub) {
     let client_id = conn.id();

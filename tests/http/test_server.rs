@@ -1,5 +1,6 @@
 extern crate axolote;
-use axolote::prelude::*;
+use axolote::Server;
+use axolote::ws::{WsConnection, WsMode, WsMessage, WsHub};
 
 fn handler_sala(mut conn: WsConnection, hub: WsHub) {
     conn.join("teste_sala");

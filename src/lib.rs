@@ -5,6 +5,11 @@ pub mod route;
 pub mod route_group;
 pub mod thread_pool;
 pub mod ws;
+pub mod json;
+
+extern crate axolote_macros;
+
+pub use axolote_macros::axolote_json;
 
 /// Módulo Prelude para facilitar a importação em projetos externos
 pub mod prelude {
@@ -410,7 +415,19 @@ impl Server {
         let config = ws_route.config.clone();
         let handler = ws_route.handler;
         
-        let id = ws::hub::next_connection_id();
+        let mut id = ws::hub::next_connection_id();
+        
+        if let Some(extractor) = &config.id_extractor {
+            if let Some(extracted_id) = extractor(req) {
+                if self.ws_hub.is_connected(extracted_id) {
+                    self.logger.warn(&format!("WS: Conexão abortada. ID {} já está em uso.", extracted_id));
+                    let _ = stream.write_all(&HttpResponse::new(409, "Conflict", "409 - ID already in use").to_bytes());
+                    return;
+                }
+                id = extracted_id;
+            }
+        }
+
         self.logger.info(&format!("WS: Conexão [ID: {}] estabelecida em {} (modo: {:?})", id, req.path, mode));
 
         match WsConnection::new(stream, mode, self.ws_hub.clone(), id, config) {

@@ -1,78 +1,60 @@
 extern crate axolote;
-use axolote::prelude::*;
 
-fn private_chat_handler(mut conn: WsConnection, hub: WsHub) {
-    // 1. O cliente se conecta com um ID temporario sequencial gerado pelo framework.
-    // O cliente envia uma mensagem inicial para autenticacao contendo o ID do seu banco de dados.
-    // Formato esperado da primeira mensagem: "AUTH:USER_DB_ID"
-    
-    let mut authenticated = false;
+use axolote::Server;
+use axolote::ws::{WsMode, WsRouteConfig};
+use axolote::axolote_json;
 
-    loop {
-        match conn.receive() {
-            Some(WsMessage::Text(texto)) => {
-                if !authenticated {
-                    if texto.starts_with("AUTH:") {
-                        let parts: Vec<&str> = texto.split(':').collect();
-                        if parts.len() == 2 {
-                            if let Ok(db_id) = parts[1].parse::<u64>() {
-                                // Tenta mudar o ID temporario da conexao para o ID do banco do usuario no Hub
-                                if conn.change_id(db_id) {
-                                    conn.send("AUTH_SUCCESS");
-                                    authenticated = true;
-                                } else {
-                                    conn.send("AUTH_FAILED: ID ja conectado.");
-                                    conn.close();
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if !authenticated {
-                        conn.send("AUTH_REQUIRED");
-                        conn.close();
-                        break;
-                    }
-                } else {
-                    // 2. Apos a autenticacao, processamos as mensagens normais
-                    // Formato esperado de mensagem privada: "TO:DESTINATARIO_ID:MENSAGEM"
-                    if texto.starts_with("TO:") {
-                        let parts: Vec<&str> = texto.splitn(3, ':').collect();
-                        if parts.len() == 3 {
-                            if let Ok(dest_id) = parts[1].parse::<u64>() {
-                                let conteudo = parts[2];
-                                let remetente = conn.id();
-                                let formatada = format!("Mensagem Privada de {}: {}", remetente, conteudo);
-                                
-                                // Envia diretamente para o ID do destinatario no Hub
-                                if hub.send_to(dest_id, &formatada) {
-                                    conn.send("ENVIO_OK");
-                                } else {
-                                    conn.send("ENVIO_FALHA: Usuario offline.");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Some(WsMessage::Close(_)) | None => break,
-            _ => {}
-        }
-    }
+#[axolote_json]
+struct PrivateMessage {
+    to: u64,
+    text: String,
+}
+
+#[axolote_json]
+struct ServerResponse {
+    status: String,
+    message: String,
 }
 
 fn main() {
     let mut server = Server::new("8080");
 
-    // Adiciona a rota configurando limites de heartbeat
-    let ws_config = WsRouteConfig {
-        max_message_size: 1024 * 1024,
-        ping_interval_secs: Some(30),
-        pong_timeout_secs: Some(10),
-        security: None,
-    };
+    // Configura a rota WebSocket para extrair o ID da conexão a partir dos parâmetros
+    // da Query String durante o Handshake HTTP. (ex: ws://localhost:8080/chat?user_id=10)
+    let ws_config = WsRouteConfig::new().id_from_query("user_id");
 
-    server.add_ws_route_with_config("/mensageiro", WsMode::Both, ws_config, private_chat_handler);
+    server.add_ws_route_with_config("/chat", WsMode::Both, ws_config, |mut conn, hub| {
+        // A conexão é estabelecida já portando o ID extraído da query.
+        println!("[WS] Conexão estabelecida. User ID vinculado: {}", conn.id());
 
+        let id = conn.id();
+        loop {
+            if let Some(msg_res) = conn.receive_json::<PrivateMessage>() {
+                match msg_res {
+                    Ok(msg) => {
+                        let delivered = hub.send_json_to(msg.to, &msg);
+                        
+                        let resp = ServerResponse {
+                            status: if delivered { "OK".to_string() } else { "ERROR".to_string() },
+                            message: if delivered { "Mensagem entregue".to_string() } else { "Usuário offline".to_string() },
+                        };
+                        conn.send_json(&resp);
+                    },
+                    Err(e) => {
+                        println!("[PM] JSON Invalido recebido do User {}: {}", id, e);
+                    }
+                }
+            } else {
+                // Conexão fechada
+                break;
+            }
+        }
+        
+        println!("[WS] Conexão encerrada para o User ID: {}.", conn.id());
+    });
+
+    println!("Servidor inicializado na porta 8080.");
+    println!("Para testar, conecte os clientes passando o parâmetro 'user_id' na query string.");
+    println!("Exemplo: ws://localhost:8080/chat?user_id=10");
     server.run();
 }

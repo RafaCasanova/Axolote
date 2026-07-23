@@ -1,5 +1,7 @@
 extern crate axolote;
-use axolote::prelude::*;
+use axolote::Server;
+use axolote::ws::{WsConnection, WsMode, WsMessage, WsHub};
+use axolote::ws::cluster::ClusterConfig;
 use std::env;
 
 /// Handler complexo mostrando roteamento de mensagens privadas, salas multiplas

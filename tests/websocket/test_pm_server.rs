@@ -1,5 +1,6 @@
 extern crate axolote;
-use axolote::prelude::*;
+use axolote::Server;
+use axolote::ws::{WsConnection, WsMode, WsMessage, WsHub};
 
 fn handler_pm(mut conn: WsConnection, hub: WsHub) {
     println!("[Servidor] ID {} conectou.", conn.id());

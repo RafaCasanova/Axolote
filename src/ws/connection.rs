@@ -10,6 +10,7 @@ use std::io::Write;
 use super::frame::{self, Opcode};
 use super::hub::WsHub;
 use crate::ws::security::WsSecurityGuard;
+use crate::json::{FromJson, ToJson};
 
 /// Configurações avançadas da rota WebSocket
 #[derive(Clone)]
@@ -18,6 +19,7 @@ pub struct WsRouteConfig {
     pub ping_interval_secs: Option<u64>,
     pub pong_timeout_secs: Option<u64>,
     pub security: Option<Arc<WsSecurityGuard>>,
+    pub id_extractor: Option<Arc<dyn Fn(&crate::http::request::HttpRequest) -> Option<u64> + Send + Sync>>,
 }
 
 impl Default for WsRouteConfig {
@@ -27,6 +29,7 @@ impl Default for WsRouteConfig {
             ping_interval_secs: Some(30), // Heartbeat padrão a cada 30s
             pong_timeout_secs: Some(10),  // 10s para timeout do pong
             security: None,
+            id_extractor: None,
         }
     }
 }
@@ -44,6 +47,28 @@ impl WsRouteConfig {
     pub fn with_heartbeat(mut self, ping_interval_secs: u64, pong_timeout_secs: u64) -> Self {
         self.ping_interval_secs = Some(ping_interval_secs);
         self.pong_timeout_secs = Some(pong_timeout_secs);
+        self
+    }
+
+    pub fn with_id_extractor<F>(mut self, extractor: F) -> Self 
+    where F: Fn(&crate::http::request::HttpRequest) -> Option<u64> + Send + Sync + 'static {
+        self.id_extractor = Some(Arc::new(extractor));
+        self
+    }
+
+    pub fn id_from_query(mut self, key: &str) -> Self {
+        let key_str = key.to_string();
+        self.id_extractor = Some(Arc::new(move |req| {
+            req.query_params.get(&key_str).and_then(|s| s.parse::<u64>().ok())
+        }));
+        self
+    }
+
+    pub fn id_from_header(mut self, key: &str) -> Self {
+        let key_str = key.to_string();
+        self.id_extractor = Some(Arc::new(move |req| {
+            req.headers.get(&key_str).and_then(|s| s.parse::<u64>().ok())
+        }));
         self
     }
 }
@@ -237,6 +262,26 @@ impl WsConnection {
                 }
             }
         }
+    }
+
+    /// Envia uma mensagem em formato JSON convertendo a struct diretamente
+    pub fn send_json<T: ToJson>(&mut self, data: &T) -> bool {
+        self.send(&data.to_json())
+    }
+
+    /// Recebe a próxima mensagem do cliente e tenta converter de JSON para a struct T.
+    /// Retorna `None` se a conexão foi fechada.
+    /// Retorna `Some(Ok(T))` se parseou com sucesso.
+    /// Retorna `Some(Err(String))` se a mensagem não era JSON válido.
+    pub fn receive_json<T: FromJson>(&mut self) -> Option<Result<T, String>> {
+        if let Some(msg) = self.receive() {
+            if let WsMessage::Text(text) = msg {
+                return Some(T::from_json(&text));
+            } else {
+                return Some(Err("Mensagem WebSocket não era texto".to_string()));
+            }
+        }
+        None
     }
 
     /// Inicia o fechamento educado (Close Handshake)

@@ -9,7 +9,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{SystemTime, Duration};
 use super::frame::{self, Opcode};
-use super::cluster::{ClusterState, envelope::{S2sEnvelope, S2sMessageType}}; // NEW
+use super::cluster::{ClusterState, envelope::{S2sEnvelope, S2sMessageType}};
+use crate::json::ToJson;
 
 const SHARD_COUNT: usize = 16;
 
@@ -120,7 +121,7 @@ impl WsHub {
 
     /// Retorna o Mutex guard do shard correspondente a um ID
     fn get_shard<'a>(&'a self, id: u64) -> std::sync::MutexGuard<'a, HubInner> {
-        self.shards[(id as usize % SHARD_COUNT)].lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.shards[id as usize % SHARD_COUNT].lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// Registra um novo cliente no Hub
@@ -184,6 +185,16 @@ impl WsHub {
         }
     }
 
+    /// Verifica se um cliente com este ID já está conectado (localmente ou no cluster)
+    pub fn is_connected(&self, id: u64) -> bool {
+        if let Some(state) = &self.cluster_state {
+            state.lookup_user_node(id).is_some()
+        } else {
+            let shard = self.get_shard(id);
+            shard.clients.contains_key(&id)
+        }
+    }
+
     /// Tenta alterar o ID de um cliente
     pub(crate) fn change_client_id(&self, old_id: u64, new_id: u64) -> bool {
         let old_idx = (old_id as usize) % SHARD_COUNT;
@@ -211,7 +222,7 @@ impl WsHub {
                 second_lock = self.shards[old_idx].lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             }
 
-            let (mut old_shard, mut new_shard) = if old_idx < new_idx {
+            let (old_shard, new_shard) = if old_idx < new_idx {
                 (&mut *first_lock, &mut *second_lock)
             } else {
                 (&mut *second_lock, &mut *first_lock)
@@ -360,7 +371,33 @@ impl WsHub {
             }
         }
         
+        
         false
+    }
+
+    /// Envia um objeto JSON para todos os clientes conectados
+    pub fn broadcast_json<T: ToJson>(&self, data: &T) {
+        self.broadcast(&data.to_json());
+    }
+
+    /// Envia um objeto JSON para todos os clientes, exceto um ID específico
+    pub fn broadcast_json_except<T: ToJson>(&self, exclude_id: u64, data: &T) {
+        self.broadcast_except(exclude_id, &data.to_json());
+    }
+
+    /// Envia um objeto JSON para todos os clientes numa sala
+    pub fn broadcast_json_to_room<T: ToJson>(&self, room: &str, data: &T) {
+        self.broadcast_to_room(room, &data.to_json());
+    }
+
+    /// Envia um objeto JSON para todos numa sala, exceto um ID
+    pub fn broadcast_json_to_room_except<T: ToJson>(&self, room: &str, exclude_id: u64, data: &T) {
+        self.broadcast_to_room_except(room, exclude_id, &data.to_json());
+    }
+
+    /// Envia um objeto JSON para um cliente específico
+    pub fn send_json_to<T: ToJson>(&self, id: u64, data: &T) -> bool {
+        self.send_to(id, &data.to_json())
     }
 
     // ========================================================================

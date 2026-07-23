@@ -1,5 +1,7 @@
 extern crate axolote;
-use axolote::prelude::*;
+use axolote::Server;
+use axolote::http::{HttpMethod, HttpRequest, HttpResponse};
+use axolote::route_group::RouteGroup;
 
 // Middleware de autenticacao simples baseado em headers
 fn auth_middleware(req: &HttpRequest) -> Option<HttpResponse> {

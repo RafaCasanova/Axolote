@@ -1,5 +1,6 @@
 extern crate axolote;
-use axolote::prelude::*;
+use axolote::Server;
+use axolote::http::{HttpMethod, HttpRequest, HttpResponse};
 
 fn home_handler(_req: HttpRequest) -> HttpResponse {
     HttpResponse::ok("Bem-vindo a Pagina Inicial")
@@ -7,12 +8,12 @@ fn home_handler(_req: HttpRequest) -> HttpResponse {
 
 fn info_handler(req: HttpRequest) -> HttpResponse {
     let client_id = req.params.get("id").cloned().unwrap_or_else(|| "Nenhum".to_string());
-    HttpResponse::ok(&format!("Informacoes do Usuario ID: {}", client_id))
+    HttpResponse::ok(format!("Informacoes do Usuario ID: {}", client_id))
 }
 
 fn create_user_handler(req: HttpRequest) -> HttpResponse {
     let body_content = req.body;
-    HttpResponse::created(&format!("Usuario criado com sucesso. Dados: {}", body_content))
+    HttpResponse::created(format!("Usuario criado com sucesso. Dados: {}", body_content))
 }
 
 fn main() {
