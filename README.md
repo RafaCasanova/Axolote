@@ -1,74 +1,80 @@
-# Backend Axolote
+# Axolote Framework
 
-**Axolote** é um framework HTTP e WebSocket escrito em Rust sem dependências externas (sem o uso de Cargo ou crates de terceiros).
+[![Language](https://img.shields.io/badge/Language-Rust-orange.svg)](https://rust-lang.org)
+[![Dependencies](https://img.shields.io/badge/Dependencies-0-brightgreen.svg)]()
+[![Cargo](https://img.shields.io/badge/Cargo-Not_Required-blue.svg)]()
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Toda a fundação técnica — roteamento, análise de requisições, logging, parsing, concorrência e o protocolo WebSocket (incluindo clustering S2S) — foi escrita utilizando estritamente a biblioteca padrão do Rust (`std`).
+*English | [Português](README-pt-BR.md)*
 
-## Arquitetura e Funcionalidades
+**Axolote** is a pure stdlib HTTP and WebSocket framework written in Rust with **zero external dependencies** (no Cargo, no Tokio, no Serde, no third-party crates).
 
-O projeto é dividido em dois módulos principais. Consulte a documentação específica de cada módulo para exemplos e detalhes de implementação:
+The entire technical foundation — routing, request parsing, JSON serialization, logging, concurrency, and the WebSocket protocol (including S2S clustering) — was built from scratch using only the Rust standard library (`std`) and raw `libc` syscalls (e.g., `epoll`).
 
-- **[Documentação do Módulo HTTP](docs/http/README.md)**: Detalha o sistema de roteamento dinâmico, extração de parâmetros de Path/Query, grupos de rotas, middlewares, concorrência nativa, tratamento de erros e suporte a IPv6.
-- **[Documentação do Módulo WebSocket](docs/websocket/README.md)**: Detalha o protocolo RFC 6455 implementado do zero, gerenciamento de conexões assíncronas, sharding O(1) com Hub de comunicação, salas de transmissão e arquitetura de Cluster Descentralizado (S2S) com protocolo de propagação em malha (Gossip Mesh Relay).
+## Quick Glance
 
-## Instruções de Compilação
+```rust
+extern crate axolote;
+use axolote::Server;
+use axolote::http::{HttpMethod, HttpRequest, HttpResponse};
 
-O projeto foi projetado para compilação direta via linha de comando (invocando o `rustc` nativamente) através de um arquivo `Makefile`.
+fn main() {
+    let mut server = Server::new("8080");
+    
+    server.add_route(HttpMethod::GET, "/", |_req: HttpRequest| {
+        HttpResponse::ok("Hello World from Axolote!")
+    });
 
-### 1. Compilando o Core do Framework
-Para compilar a engine e gerar a biblioteca estática `.rlib`:
+    server.run();
+}
+```
+
+## Architecture & Features
+
+The project is divided into two main modules:
+
+- **[HTTP Module](docs/http/README.md)**: Dynamic routing, path/query extraction, middlewares, non-blocking I/O with custom `epoll` reactor, custom JSON parser `#[axolote_json]` (without `serde`), and thread-pool based concurrency.
+- **[WebSocket Module](docs/websocket/README.md)**: From-scratch RFC 6455 implementation (framing, masking, SHA-1 handshake), O(1) Sharding Pub/Sub Hub, rooms, and a **Decentralized S2S Cluster** using a Gossip Mesh Relay protocol.
+
+## Building the Framework
+
+The project is designed to be compiled directly via the command line (invoking `rustc` natively) using a `Makefile`. No Cargo required.
+
+### 1. Build the Core Library
+Compile the engine and generate the static library (`.rlib`):
 ```bash
 make build-lib
 ```
 
-### 2. Compilando os Exemplos
-A pasta `/examples` contém instâncias práticas de como consumir o framework. Os exemplos estão separados em `/examples/http` e `/examples/websocket`.
-Para compilar todos eles automaticamente:
+### 2. Build Examples
+The `/examples` directory contains practical use cases. To compile all of them:
 ```bash
 make examples
 ```
 
-### 3. Limpeza do Ambiente
-Para remover arquivos de compilação, executáveis gerados e logs de teste, execute:
+### 3. Clean
 ```bash
 make clean
 ```
 
-## Como Usar a Biblioteca em Outros Projetos
+## Using Axolote in Your Projects
 
-Como o projeto é construído sem dependências e sem o gerenciador de pacotes `cargo`, o resultado da compilação é um binário estático de biblioteca do Rust (`.rlib`).
+Because it has no dependencies, you link the compiled library directly.
 
-Para utilizar o framework `axolote` no seu próprio projeto, siga os passos:
+1. Grab the `libaxolote.rlib` file.
+2. In your code, declare `extern crate axolote;`.
+3. Compile with `rustc main.rs --extern axolote=libaxolote.rlib`.
 
-1. Baixe o arquivo gerado `libaxolote.rlib` e copie para dentro da pasta do seu projeto.
-2. No seu código fonte (ex: `main.rs`), declare o uso da biblioteca:
-   ```rust
-   extern crate axolote;
-   ```
-3. Compile o seu projeto utilizando o compilador puro `rustc` passando a flag `--extern` para indicar onde a biblioteca se encontra:
-   ```bash
-   rustc main.rs --extern axolote=libaxolote.rlib
-   ```
+**Using with Cargo:**
+If your target project uses Cargo, you can drop `libaxolote.rlib` and the provided **`build.rs`** into your project root. Cargo will automatically link it.
 
-**Uso com Cargo (Para Usuários do Gerenciador de Pacotes):**  
-Se o seu projeto de destino utilizar o Cargo, você pode automatizar a linkagem sem precisar passar flags no terminal. Para isso:
-1. Copie o arquivo `libaxolote.rlib` e também o arquivo **`build.rs`** deste repositório para a raiz do seu projeto Cargo (ao lado do seu `Cargo.toml`).
-2. Adicione `extern crate axolote;` no seu `main.rs`.
-3. Rode `cargo build` ou `cargo run` normalmente. O arquivo `build.rs` instruirá o Cargo a encontrar e anexar a biblioteca pré-compilada automaticamente.
+## Documentation & Examples
 
-## Exemplos e Documentação Detalhada
+Detailed architecture guides and ready-to-run examples can be found in the [`docs/`](docs/) directory:
 
-Para conferir guias completos de arquitetura, tutoriais passo a passo e códigos de exemplo prontos para execução, consulte os diretórios dentro da pasta [`docs/`](docs/):
+- **HTTP**: [Guide](docs/http/README.md) | [Examples](docs/http/examples/)
+- **WebSocket**: [Guide](docs/websocket/README.md) | [Security](docs/websocket/SECURITY.md) | [Gossip Mesh Cluster](docs/websocket/CLUSTER.md) | [Examples](docs/websocket/examples/)
 
-- **Módulo HTTP**:
-  - [Guia e Documentação HTTP](docs/http/README.md)
-  - [Exemplos de Código HTTP](docs/http/examples/)
-- **Módulo WebSocket**:
-  - [Guia e Documentação WebSocket](docs/websocket/README.md)
-  - [Módulo de Segurança WebSocket](docs/websocket/SECURITY.md)
-  - [Arquitetura de Cluster e Gossip Mesh](docs/websocket/CLUSTER.md)
-  - [Exemplos de Código WebSocket](docs/websocket/examples/)
+## License
 
-## Licença
-
-Distribuído sob a licença MIT. Consulte o arquivo `LICENSE` para maiores informações e restrições legais.
+MIT License. See `LICENSE` for more information.
