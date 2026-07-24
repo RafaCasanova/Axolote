@@ -3,7 +3,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::process::Command;
+use std::process::{Command, Stdio, Child};
+use std::collections::HashMap;
 use std::net::TcpStream;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -109,6 +110,7 @@ impl Logger {
 /// Worker em background que processa a fila de logs e limpa arquivos velhos
 fn logger_worker(rx: mpsc::Receiver<LogMessage>, config: LoggerConfig) {
     let mut last_cleanup = SystemTime::now();
+    let mut ssh_pipes: HashMap<String, Child> = HashMap::new();
 
     loop {
         match rx.recv_timeout(std::time::Duration::from_millis(config.heart_beat_ms)) {
@@ -116,7 +118,7 @@ fn logger_worker(rx: mpsc::Receiver<LogMessage>, config: LoggerConfig) {
                 for dispatcher in &config.dispatchers {
                     if msg.level >= dispatcher.min_level {
                         let formatted = format_log(&msg, &dispatcher.format);
-                        dispatch_log(&formatted, &dispatcher.target);
+                        dispatch_log(&formatted, &dispatcher.target, &mut ssh_pipes);
                     }
                 }
             }
@@ -153,7 +155,7 @@ fn format_log(msg: &LogMessage, format: &LogFormat) -> String {
     }
 }
 
-fn dispatch_log(payload: &str, target: &LogTarget) {
+fn dispatch_log(payload: &str, target: &LogTarget, ssh_pipes: &mut HashMap<String, Child>) {
     match target {
         LogTarget::Console => {
             println!("{}", payload);
@@ -176,13 +178,19 @@ fn dispatch_log(payload: &str, target: &LogTarget) {
             }
         }
         LogTarget::Ssh { user_host, path } => {
-            // Invoca SSH no sistema para apendar ao arquivo remoto
-            let safe_payload = payload.replace("'", "'\\''");
-            let cmd = format!("echo '{}' >> {}", safe_payload, path);
-            let _ = Command::new("ssh")
-                .arg(user_host)
-                .arg(cmd)
-                .output();
+            // Usa pipe bidirecional persistente (Impede injeção de comandos)
+            let key = format!("{}@{}", user_host, path);
+            let child = ssh_pipes.entry(key).or_insert_with(|| {
+                Command::new("ssh")
+                    .arg(user_host)
+                    .arg(format!("cat >> {}", path))
+                    .stdin(Stdio::piped())
+                    .spawn()
+                    .expect("Failed to start SSH process")
+            });
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = writeln!(stdin, "{}", payload);
+            }
         }
     }
 }

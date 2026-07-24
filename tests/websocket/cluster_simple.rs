@@ -4,18 +4,21 @@ use axolote::ws::{WsConnection, WsMode, WsMessage, WsHub};
 use axolote::ws::cluster::ClusterConfig;
 use std::env;
 
-fn chat_handler(mut conn: WsConnection, hub: WsHub) {
+fn chat_handler(conn: &mut WsConnection, hub: WsHub) {
     conn.join("lobby");
     println!("Novo cliente conectado! ID: {}", conn.id());
 
-    while let Some(msg) = conn.receive() {
+    conn.on_message(|id, hub, msg| {
         if let WsMessage::Text(texto) = msg {
-            let log_msg = format!("Node original [User {}]: {}", conn.id(), texto);
+            let log_msg = format!("Node original [User {}]: {}", id, texto);
             println!("Broadcast: {}", log_msg);
             hub.broadcast_to_room("lobby", &log_msg);
         }
-    }
-    println!("Cliente desconectado: {}", conn.id());
+    });
+
+    conn.on_close(|id, _hub, _code| {
+        println!("Cliente desconectado: {}", id);
+    });
 }
 
 fn main() {

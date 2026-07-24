@@ -15,4 +15,4 @@ pub use self::cluster::{ClusterConfig, ClusterState, ClusterManager}; // NEW
 
 /// Assinatura padrão para os handlers WebSocket
 /// O handler recebe a conexão por valor, além de uma referência ao Hub compartilhado
-pub type WsHandlerFn = fn(WsConnection, WsHub);
+pub type WsHandlerFn = fn(&mut WsConnection, WsHub);

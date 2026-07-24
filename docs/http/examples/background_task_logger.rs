@@ -1,5 +1,4 @@
 extern crate axolote;
-use axolote::Server;
 use axolote::logger::{Logger, LoggerConfig, LogFormat, LogTarget, LogLevel, LogDispatcher};
 use std::thread;
 use std::time::Duration;

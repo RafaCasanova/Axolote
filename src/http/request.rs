@@ -8,13 +8,33 @@ pub struct HttpRequest {
     pub params: HashMap<String, String>,
     pub query_params: HashMap<String, String>,
     pub headers: HashMap<String, String>,
-    pub body: String,
+    pub body: Vec<u8>,
 }
 
 impl HttpRequest {
-    /// Faz o parse da string bruta da requisição HTTP e devolve um HttpRequest
-    pub fn from_raw(raw: &str) -> Option<Self> {
-        let mut lines = raw.lines();
+    /// Faz o parse dos bytes brutos da requisição HTTP e devolve um HttpRequest
+    pub fn from_bytes(raw: &[u8]) -> Option<Self> {
+        let mut headers_end = 0;
+        for i in 0..raw.len().saturating_sub(3) {
+            if &raw[i..i+4] == b"\r\n\r\n" {
+                headers_end = i + 4;
+                break;
+            }
+        }
+        if headers_end == 0 {
+            for i in 0..raw.len().saturating_sub(1) {
+                if &raw[i..i+2] == b"\n\n" {
+                    headers_end = i + 2;
+                    break;
+                }
+            }
+        }
+        if headers_end == 0 {
+            return None;
+        }
+
+        let header_str = String::from_utf8_lossy(&raw[..headers_end]);
+        let mut lines = header_str.lines();
         let request_line = lines.next()?;
         let parts: Vec<&str> = request_line.split_whitespace().collect();
         if parts.len() < 3 {
@@ -42,26 +62,18 @@ impl HttpRequest {
         };
 
         let mut headers = HashMap::new();
-        let mut body = String::new();
-        let mut parsing_body = false;
 
         for line in lines {
             if line.trim().is_empty() {
-                parsing_body = true;
                 continue;
             }
 
-            if parsing_body {
-                body.push_str(line);
-                body.push('\n');
-            } else {
-                if let Some((key, value)) = line.split_once(':') {
-                    headers.insert(key.trim().to_string(), value.trim().to_string());
-                }
+            if let Some((key, value)) = line.split_once(':') {
+                headers.insert(key.trim().to_lowercase(), value.trim().to_string());
             }
         }
 
-        let body_clean = body.trim_end_matches('\0').trim().to_string();
+        let body = raw[headers_end..].to_vec();
 
         Some(HttpRequest {
             method,
@@ -69,8 +81,13 @@ impl HttpRequest {
             params: HashMap::new(),
             query_params,
             headers,
-            body: body_clean,
+            body,
         })
+    }
+
+    /// Retorna o corpo da requisição formatado como string UTF-8 (útil para payloads JSON/Texto)
+    pub fn body_utf8(&self) -> String {
+        String::from_utf8_lossy(&self.body).trim_end_matches('\0').trim().to_string()
     }
 
     /// Extrai o conteúdo do HttpRequest a partir de um &mut self,
@@ -88,7 +105,7 @@ impl HttpRequest {
     }
 
     /// Remove o corpo da requisição
-    pub fn take_body(&mut self) -> String {
+    pub fn take_body(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.body)
     }
 
@@ -97,7 +114,8 @@ impl HttpRequest {
     /// Processa o corpo da requisição como Form Data (application/x-www-form-urlencoded)
     pub fn form_data(&self) -> HashMap<String, String> {
         let mut form = HashMap::new();
-        for pair in self.body.split('&') {
+        let body_str = self.body_utf8();
+        for pair in body_str.split('&') {
             if let Some((k, v)) = pair.split_once('=') {
                 form.insert(Self::url_decode(k), Self::url_decode(v));
             } else if !pair.is_empty() {

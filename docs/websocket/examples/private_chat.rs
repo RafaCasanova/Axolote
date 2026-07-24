@@ -1,7 +1,7 @@
 extern crate axolote;
 
 use axolote::Server;
-use axolote::ws::{WsMode, WsRouteConfig};
+use axolote::ws::{WsConnection, WsHub, WsMode, WsRouteConfig};
 use axolote::axolote_json;
 
 #[axolote_json]
@@ -23,34 +23,30 @@ fn main() {
     // da Query String durante o Handshake HTTP. (ex: ws://localhost:8080/chat?user_id=10)
     let ws_config = WsRouteConfig::new().id_from_query("user_id");
 
-    server.add_ws_route_with_config("/chat", WsMode::Both, ws_config, |mut conn, hub| {
+    server.add_ws_route_with_config("/chat", WsMode::Both, ws_config, |conn: &mut WsConnection, _hub: WsHub| {
         // A conexão é estabelecida já portando o ID extraído da query.
         println!("[WS] Conexão estabelecida. User ID vinculado: {}", conn.id());
 
-        let id = conn.id();
-        loop {
-            if let Some(msg_res) = conn.receive_json::<PrivateMessage>() {
-                match msg_res {
-                    Ok(msg) => {
-                        let delivered = hub.send_json_to(msg.to, &msg);
-                        
-                        let resp = ServerResponse {
-                            status: if delivered { "OK".to_string() } else { "ERROR".to_string() },
-                            message: if delivered { "Mensagem entregue".to_string() } else { "Usuário offline".to_string() },
-                        };
-                        conn.send_json(&resp);
-                    },
-                    Err(e) => {
-                        println!("[PM] JSON Invalido recebido do User {}: {}", id, e);
-                    }
+        conn.on_message_json(|id, hub_ref, msg_res: Result<PrivateMessage, String>| {
+            match msg_res {
+                Ok(msg) => {
+                    let delivered = hub_ref.send_json_to(msg.to, &msg);
+                    
+                    let resp = ServerResponse {
+                        status: if delivered { "OK".to_string() } else { "ERROR".to_string() },
+                        message: if delivered { "Mensagem entregue".to_string() } else { "Usuário offline".to_string() },
+                    };
+                    hub_ref.send_json_to(id, &resp);
+                },
+                Err(e) => {
+                    println!("[PM] JSON Invalido recebido do User {}: {}", id, e);
                 }
-            } else {
-                // Conexão fechada
-                break;
             }
-        }
+        });
         
-        println!("[WS] Conexão encerrada para o User ID: {}.", conn.id());
+        conn.on_close(|id, _, _| {
+            println!("[WS] Conexão encerrada para o User ID: {}.", id);
+        });
     });
 
     println!("Servidor inicializado na porta 8080.");

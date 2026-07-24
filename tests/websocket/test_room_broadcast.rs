@@ -8,20 +8,14 @@ use std::thread;
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
 
-/// Handler do servidor
-fn handler_sala(mut conn: WsConnection, hub: WsHub) {
+fn handler_sala(conn: &mut WsConnection, hub: WsHub) {
     conn.join("teste_sala");
 
-    loop {
-        match conn.receive() {
-            Some(WsMessage::Text(msg)) => {
-                // Ao receber, faz o broadcast na sala
-                hub.broadcast_to_room("teste_sala", &msg);
-            }
-            Some(WsMessage::Close(_)) | None => break,
-            _ => {}
+    conn.on_message(|_id, hub, msg| {
+        if let WsMessage::Text(text) = msg {
+            hub.broadcast_to_room("teste_sala", &text);
         }
-    }
+    });
 }
 
 /// Cria um cliente TCP simples que faz o handshake WS
@@ -76,7 +70,7 @@ fn main() {
     let msgs_c1_clone = msgs_c1.clone();
     let mut c1_stream = cliente1.try_clone().unwrap();
     thread::spawn(move || {
-        while let Some(f) = frame::read_frame(&mut c1_stream, 65536) {
+        while let Some(f) = frame::read_frame(&mut c1_stream, 65536, false) {
             if f.opcode == Opcode::Text {
                 let text = String::from_utf8_lossy(&f.payload).to_string();
                 msgs_c1_clone.lock().unwrap().push(text);
@@ -88,7 +82,7 @@ fn main() {
     let msgs_c2_clone = msgs_c2.clone();
     let mut c2_stream = cliente2.try_clone().unwrap();
     thread::spawn(move || {
-        while let Some(f) = frame::read_frame(&mut c2_stream, 65536) {
+        while let Some(f) = frame::read_frame(&mut c2_stream, 65536, false) {
             if f.opcode == Opcode::Text {
                 let text = String::from_utf8_lossy(&f.payload).to_string();
                 msgs_c2_clone.lock().unwrap().push(text);
@@ -110,7 +104,7 @@ fn main() {
     // O cliente envia um frame de texto. No RFC o cliente devia fazer mask, mas
     // o nosso server aceita unmasked (já que no read_frame ele só faz unmask se o bit estiver setado).
     // Usamos o write_frame do framework que envia unmasked.
-    frame::write_frame(&mut cliente3, Opcode::Text, msg_secreta.as_bytes());
+    frame::write_client_frame(&mut cliente3, Opcode::Text, msg_secreta.as_bytes());
 
     // 5. Aguarda a propagação
     thread::sleep(Duration::from_millis(500));

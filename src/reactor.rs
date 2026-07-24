@@ -13,6 +13,7 @@ pub const EPOLLIN: u32 = 0x001;
 pub const EPOLLOUT: u32 = 0x004;
 pub const EPOLLERR: u32 = 0x008;
 pub const EPOLLHUP: u32 = 0x010;
+pub const EPOLLONESHOT: u32 = 1 << 30;
 pub const EPOLLET: u32 = 1 << 31;
 
 pub const EPOLL_CTL_ADD: i32 = 1;
@@ -74,6 +75,18 @@ impl Reactor {
         unsafe { epoll_ctl(self.epoll_fd, EPOLL_CTL_DEL, fd, &mut event) };
         if let Ok(mut cb_map) = self.callbacks.lock() {
             cb_map.remove(&fd);
+        }
+        Ok(())
+    }
+
+    pub fn modify(&self, fd: RawFd, interest: u32) -> Result<(), std::io::Error> {
+        let mut event = EpollEvent {
+            events: interest | EPOLLET,
+            data: fd as u64,
+        };
+        let res = unsafe { epoll_ctl(self.epoll_fd, EPOLL_CTL_MOD, fd, &mut event) };
+        if res < 0 {
+            return Err(std::io::Error::last_os_error());
         }
         Ok(())
     }

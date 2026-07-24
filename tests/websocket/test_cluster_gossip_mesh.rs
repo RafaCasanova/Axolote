@@ -7,13 +7,13 @@ use std::net::TcpStream;
 use std::thread;
 use std::time::Duration;
 
-fn chat_handler(mut conn: WsConnection, hub: WsHub) {
+fn chat_handler(conn: &mut WsConnection, hub: WsHub) {
     conn.join("mesh_room");
-    while let Some(msg) = conn.receive() {
+    conn.on_message(|_id, hub, msg| {
         if let WsMessage::Text(text) = msg {
             hub.broadcast_to_room("mesh_room", &text);
         }
-    }
+    });
 }
 
 fn create_client(port: &str) -> TcpStream {

@@ -46,6 +46,7 @@ fn chat_handler(mut conn: WsConnection, hub: WsHub) {
             WsMessage::Binary(dados) => {
                 // Manipulação de pacotes binários customizados
             }
+            _ => {} // Ignora Ping, Pong e Close
         }
     }
     

@@ -14,6 +14,10 @@ use axolote::http::{HttpMethod, HttpRequest, HttpResponse};
 
 fn main() {
     let mut server = Server::new("8080");
+
+    // Para expor na rede local ou internet, altere o host para "0.0.0.0"
+    server.set_host("0.0.0.0");
+
     server.run(); // Bloqueia a thread principal ouvindo conexões
 }
 ```
@@ -22,9 +26,9 @@ Internamente, instâncias da configuração de rotas são propagadas via `Arc` (
 
 ## 2. Roteamento e Manipuladores de Requisição
 
-A API de roteamento permite associar métodos HTTP específicos a manipuladores de função (Handlers). 
+A API de roteamento permite associar métodos HTTP específicos a manipuladores de função ou closures (`Box<dyn Fn(HttpRequest) -> HttpResponse + Send + Sync>`). 
 
-Um manipulador deve respeitar a assinatura `fn(HttpRequest) -> HttpResponse`.
+Um manipulador aceita um `HttpRequest` e retorna um `HttpResponse`. Podem ser usadas tanto funções normais quanto closures `move || {}`:
 
 ### Roteamento Simples
 ```rust
@@ -33,6 +37,29 @@ fn home_handler(_req: HttpRequest) -> HttpResponse {
 }
 
 server.add_route(HttpMethod::GET, "/", home_handler);
+```
+
+### CORS Nativo (Cross-Origin Resource Sharing)
+Para plugar a sua API HTTP num Frontend feito em React, Vue ou Angular, você precisa lidar com CORS. 
+O Axolote possui um Middleware Nativo embutido no núcleo do servidor que resolve isso com 1 linha de código e trata requisições de *preflight* (`OPTIONS`) de forma invisível.
+
+```rust
+use axolote::http::cors::CorsConfig;
+
+// Habilita CORS com a configuração padrão (Libera tudo '*')
+server.enable_cors(CorsConfig::default());
+
+// Ou, de forma estrita para Produção:
+// server.enable_cors(CorsConfig::restrictive(vec!["https://meu-app.com", "http://localhost:3000"]));
+```
+
+### Servidor de Arquivos Estáticos (HTML, CSS, JS, Imagens)
+Se você for hospedar o Frontend (React, Vue, etc) no mesmo servidor ou quiser expor imagens, PDFs e vídeos, o Axolote serve os binários nativamente inferindo Content-Types sem necessidade de plugins:
+
+```rust
+// Mapeia as requisições que começam com "/public" para a pasta local "./meus_arquivos"
+// Proteção automática contra Path Traversal inclusa!
+server.serve_dir("/public", "./meus_arquivos");
 ```
 
 ### Roteamento com Parâmetros Dinâmicos de Caminho (Path Parameters)
@@ -89,7 +116,7 @@ fn auth_middleware(req: &mut HttpRequest) -> Option<HttpResponse> {
 }
 
 let mut protected_group = RouteGroup::new("/secure");
-protected_group.add_middleware(auth_middleware);
+protected_group.set_middleware(auth_middleware);
 protected_group.add_route(HttpMethod::GET, "/data", secure_data_handler);
 ```
 
@@ -106,19 +133,17 @@ A estrutura `HttpResponse` encapsula o código de estado HTTP, cabeçalhos custo
 Para construir respostas complexas, utilize o construtor customizado:
 ```rust
 let mut custom_response = HttpResponse::new(201, "Created", "Recurso salvo com sucesso");
-custom_response.headers.insert("Content-Type".to_string(), "application/json".to_string());
+custom_response.headers.push(("Content-Type".to_string(), "application/json".to_string()));
 ```
 
 ## 6. Sistema de Registro (Logger)
 
-Um módulo nativo de logging foi introduzido para gerar rastreabilidade estruturada. Ele calcula o offset de *Unix Epoch* em `SystemTime` para padronizar carimbos temporais, registrando eventos de roteamento e execuções em três níveis de prioridade.
+Um módulo nativo de logging foi introduzido para gerar rastreabilidade estruturada. A instância do servidor possui um logger que pode ser utilizado:
 
 ```rust
-use axolote::server::logger;
-
-logger::log_info("Servidor HTTP inicializado com sucesso.");
-logger::log_warn("Alta latência detectada na requisição de banco de dados.");
-logger::log_error("Falha ao analisar o corpo JSON.");
+server.logger.info("Servidor HTTP inicializado com sucesso.");
+server.logger.warn("Alta latência detectada na requisição de banco de dados.");
+server.logger.error("Falha ao analisar o corpo JSON.");
 ```
 
 ## 7. Suporte a JSON e Serialização
@@ -130,8 +155,8 @@ use axolote::json::{FromJson, ToJson};
 
 #[axolote_json]
 struct User {
-    name: String,
-    age: u8,
+    id: u64,
+    username: String,
     
     // Este campo não será convertido para JSON nem exibido para o cliente
     #[json(ignore)]
@@ -145,7 +170,7 @@ struct User {
 fn handle_post(req: HttpRequest) -> HttpResponse {
     // ABORDAGEM 1: from_json (Cria a struct do zero lendo a string)
     // O retorno é Result<User, String>, você tem total controle!
-    let user = match User::from_json(&req.body) {
+    let user = match User::from_json(&req.body_utf8()) {
         Ok(u) => u,
         Err(e) => return HttpResponse::bad_request(e),
     };
@@ -157,12 +182,13 @@ fn handle_post(req: HttpRequest) -> HttpResponse {
 fn handle_bind(req: HttpRequest) -> HttpResponse {
     // ABORDAGEM 2: bind_json (Preenchimento Mutável - Atualiza só o que vier no JSON)
     let mut user = User {
-        name: "Desconhecido".to_string(),
-        age: 0,
+        id: 0,
+        username: "Desconhecido".to_string(),
+        internal_hash: "".to_string(),
     };
     
     // Atualiza a estrutura com os dados recebidos. Pode gerar erro se o payload for inválido.
-    if let Err(e) = user.bind_json(&req.body) {
+    if let Err(e) = user.bind_json(&req.body_utf8()) {
         return HttpResponse::bad_request(&format!("Erro: {}", e));
     }
 
@@ -207,7 +233,7 @@ fn auth_handler(_req: HttpRequest) -> HttpResponse {
         .with_cookie("session", auth_token)
 }
 
-// Exemplo retornando uma Struct (JSON automático)
+// Exemplo retornando uma Struct (Transformando em JSON)
 fn user_profile_handler(_req: HttpRequest) -> HttpResponse {
     let user = User {
         id: 123,
@@ -215,9 +241,9 @@ fn user_profile_handler(_req: HttpRequest) -> HttpResponse {
         internal_hash: "oculto".to_string(),
     };
 
-    // A trait IntoBody converte a struct automaticamente para JSON 
-    // e injeta o cabeçalho Content-Type: application/json
-    HttpResponse::ok(user)
+    // Converta a struct para string JSON manualmente
+    HttpResponse::ok(user.to_json())
+        .with_header("Content-Type", "application/json")
         .with_header("X-Powered-By", "Axolote")
 }
 ```

@@ -1,6 +1,6 @@
 extern crate axolote;
 use axolote::Server;
-use axolote::ws::{WsRouteConfig, WsMessage, WsMode};
+use axolote::ws::{WsRouteConfig, WsMessage, WsMode, WsConnection, WsHub};
 
 fn main() {
     let mut server = Server::new("8080");
@@ -14,13 +14,13 @@ fn main() {
                 .and_then(|id_str| id_str.parse::<u64>().ok())
         });
 
-    server.add_ws_route_with_config("/chat", WsMode::Both, ws_config, |mut conn, hub| {
+    server.add_ws_route_with_config("/chat", WsMode::Both, ws_config, |conn: &mut WsConnection, _hub: WsHub| {
         // A conexão é estabelecida já portando o ID extraído.
         // Caso o ID já esteja em uso no servidor/cluster, o Handshake é 
         // automaticamente recusado com status HTTP 409 Conflict.
         println!("[WS] Conexão estabelecida. User ID vinculado: {}", conn.id());
 
-        while let Some(msg) = conn.receive() {
+        conn.on_message(|id, hub_ref, msg| {
             if let WsMessage::Text(texto) = msg {
                 // Protocolo simples de roteamento: "target_id:mensagem"
                 // Exemplo de payload esperado do cliente: "20:Hello World"
@@ -28,19 +28,21 @@ fn main() {
                     if let Ok(target_id) = target_id_str.parse::<u64>() {
                         
                         // Roteia a mensagem diretamente para o cliente de destino através do Hub.
-                        let delivered = hub.send_to(target_id, payload);
+                        let delivered = hub_ref.send_to(target_id, payload);
                         
                         if delivered {
-                            println!("[WS] Mensagem roteada do ID {} para o ID {}.", conn.id(), target_id);
+                            println!("[WS] Mensagem roteada do ID {} para o ID {}.", id, target_id);
                         } else {
                             println!("[WS] Falha de roteamento: O ID de destino {} não está acessível.", target_id);
                         }
                     }
                 }
             }
-        }
+        });
         
-        println!("[WS] Conexão encerrada para o User ID: {}.", conn.id());
+        conn.on_close(|id, _, _| {
+            println!("[WS] Conexão encerrada para o User ID: {}.", id);
+        });
     });
 
     println!("Servidor inicializado na porta 8080.");

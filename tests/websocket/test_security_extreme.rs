@@ -15,9 +15,9 @@ fn main() {
         let mut server = Server::new("8081");
 
         // Rota Aberta (Sem segurança)
-        server.add_ws_route("/ws/public", WsMode::Both, |mut conn: WsConnection, _hub: WsHub| {
+        server.add_ws_route("/ws/public", WsMode::Both, |conn: &mut WsConnection, _hub: WsHub| {
             conn.send("Bem-vindo à rota pública!");
-            while let Some(_) = conn.receive() {}
+            conn.on_message(|_, _, _| {});
         });
 
         // Rota Protegida (Exige Header e Query)
@@ -33,9 +33,9 @@ fn main() {
             id_extractor: None,
         };
 
-        server.add_ws_route_with_config("/ws/vault", WsMode::Both, config, |mut conn: WsConnection, _hub: WsHub| {
+        server.add_ws_route_with_config("/ws/vault", WsMode::Both, config, |conn: &mut WsConnection, _hub: WsHub| {
             conn.send("Bem-vindo ao cofre! Você passou em todas as verificações.");
-            while let Some(_) = conn.receive() {}
+            conn.on_message(|_, _, _| {});
         });
 
         println!("Servidor de Teste Extremo Iniciado na porta 8081...");

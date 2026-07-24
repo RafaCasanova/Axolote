@@ -17,7 +17,7 @@ fn main() {
 
     println!("BOB: Conectado! (Deveria ser o ID 1). Aguardando mensagem privada...");
 
-    while let Some(f) = frame::read_frame(&mut stream, 65536) {
+    while let Some(f) = frame::read_frame(&mut stream, 65536, false) {
         if f.opcode == Opcode::Text {
             let text = String::from_utf8_lossy(&f.payload).to_string();
             println!("💬 BOB RECEBEU: {}", text);

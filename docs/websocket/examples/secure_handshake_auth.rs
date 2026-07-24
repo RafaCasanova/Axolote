@@ -3,8 +3,6 @@ use axolote::Server;
 use axolote::ws::{WsConnection, WsHub, WsMode, WsRouteConfig};
 use axolote::ws::security::WsSecurityGuard;
 use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
 
 fn main() {
     let mut server = Server::new("127.0.0.1:8080");
@@ -31,24 +29,23 @@ fn main() {
         id_extractor: None,
     };
 
-    server.add_ws_route_with_config("/ws/secure", WsMode::Both, config, |mut conn: WsConnection, _hub: WsHub| {
+    server.add_ws_route_with_config("/ws/secure", WsMode::Both, config, |conn: &mut WsConnection, _hub: WsHub| {
         println!("Cliente conectado na rota segura! ID: {}", conn.id());
         
         // Envia mensagem de boas vindas
         conn.send("Você está em uma rota hiper-segura!");
 
-        loop {
-            match conn.receive() {
-                Some(msg) => {
-                    println!("Recebido do cliente seguro: {:?}", msg);
-                    conn.send("Mensagem segura recebida com sucesso!");
-                }
-                None => {
-                    println!("Cliente seguro desconectou.");
-                    break;
-                }
-            }
-        }
+        conn.on_message(|_id, _hub_ref, msg| {
+            println!("Recebido do cliente seguro: {:?}", msg);
+            // Isso não pode responder diretamente sem a referência ao hub, 
+            // no modo antigo o conn.send() mandava, agora usamos o WsHub no event loop!
+            // Para consertar o exemplo, vamos logar apenas, e usar o hub_ref.
+            _hub_ref.send_to(_id, "Mensagem segura recebida com sucesso!");
+        });
+
+        conn.on_close(|_id, _hub_ref, _code| {
+            println!("Cliente seguro desconectou.");
+        });
     });
 
     println!("Iniciando servidor de WebSocket SEGURO...");

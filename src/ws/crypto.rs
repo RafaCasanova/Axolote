@@ -116,3 +116,50 @@ pub fn base64_encode(data: &[u8]) -> String {
 
     result
 }
+
+// ==========================================
+// HMAC-SHA1
+// ==========================================
+
+pub fn hmac_sha1(key: &[u8], message: &[u8]) -> [u8; 20] {
+    let mut key_block = [0u8; 64];
+    if key.len() > 64 {
+        let hashed_key = sha1(key);
+        key_block[..20].copy_from_slice(&hashed_key);
+    } else {
+        key_block[..key.len()].copy_from_slice(key);
+    }
+
+    let mut o_key_pad = [0u8; 64];
+    let mut i_key_pad = [0u8; 64];
+    for i in 0..64 {
+        o_key_pad[i] = key_block[i] ^ 0x5c;
+        i_key_pad[i] = key_block[i] ^ 0x36;
+    }
+
+    let mut inner_data = Vec::with_capacity(64 + message.len());
+    inner_data.extend_from_slice(&i_key_pad);
+    inner_data.extend_from_slice(message);
+    let inner_hash = sha1(&inner_data);
+
+    let mut outer_data = Vec::with_capacity(64 + 20);
+    outer_data.extend_from_slice(&o_key_pad);
+    outer_data.extend_from_slice(&inner_hash);
+
+    sha1(&outer_data)
+}
+
+// ==========================================
+// PREVENÇÃO DE TIMING ATTACK
+// ==========================================
+
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut result = 0;
+    for (x, y) in a.bytes().zip(b.bytes()) {
+        result |= x ^ y;
+    }
+    result == 0
+}

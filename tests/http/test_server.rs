@@ -2,26 +2,19 @@ extern crate axolote;
 use axolote::Server;
 use axolote::ws::{WsConnection, WsMode, WsMessage, WsHub};
 
-fn handler_sala(mut conn: WsConnection, hub: WsHub) {
+fn handler_sala(conn: &mut WsConnection, hub: WsHub) {
     conn.join("teste_sala");
 
-    loop {
-        match conn.receive() {
-            Some(WsMessage::Text(msg)) => {
-                println!("[Servidor] ID {} enviou para a sala: {}", conn.id(), msg);
-                hub.broadcast_to_room("teste_sala", &msg);
-            }
-            Some(WsMessage::Close(_)) => {
-                println!("[Servidor] ID {} saiu.", conn.id());
-                break;
-            }
-            None => {
-                println!("[Servidor] ID {} desconectado de forma inesperada.", conn.id());
-                break;
-            }
-            _ => {}
+    conn.on_message(|id, hub, msg| {
+        if let WsMessage::Text(text) = msg {
+            println!("[Servidor] ID {} enviou para a sala: {}", id, text);
+            hub.broadcast_to_room("teste_sala", &text);
         }
-    }
+    });
+
+    conn.on_close(|id, _hub, _code| {
+        println!("[Servidor] ID {} saiu ou desconectou de forma inesperada.", id);
+    });
 }
 
 fn main() {

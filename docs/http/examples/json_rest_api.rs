@@ -38,7 +38,7 @@ struct UserProfile {
 fn create_user(req: HttpRequest) -> HttpResponse {
     // Desserializa a string JSON para a struct.
     // O retorno é Result<CreateUserReq, String>, exigindo tratamento explícito.
-    let req_obj = match CreateUserReq::from_json(&req.body) {
+    let req_obj = match CreateUserReq::from_json(&req.body_utf8()) {
         Ok(obj) => obj,
         Err(e) => return HttpResponse::bad_request(e), // Se falhar, avisa o cliente imediatamente!
     };
@@ -66,7 +66,7 @@ fn update_user(req: HttpRequest) -> HttpResponse {
 
     // Realiza o binding do JSON recebido, sobrepondo os valores na struct.
     // Se o formato geral for inválido, podemos retornar erro.
-    if let Err(e) = current_user.bind_json(&req.body) {
+    if let Err(e) = current_user.bind_json(&req.body_utf8()) {
         return HttpResponse::bad_request(format!("JSON Inválido: {}", e));
     }
 

@@ -13,7 +13,7 @@ MACRO_OUT = lib$(MACRO_NAME).so
 HTTP_TESTS = test_server
 
 # Lista de exemplos HTTP
-HTTP_EXAMPLES = hello_world path_and_query_params routes_grouping_middleware server_advanced_config http_request_logger background_task_logger json_rest_api multipart_form_data basic_routing groups_middleware query_parameters
+HTTP_EXAMPLES = hello_world path_and_query_params routes_grouping_middleware server_advanced_config http_request_logger background_task_logger json_rest_api multipart_form_data basic_routing groups_middleware query_parameters cors_rest_api static_server
 
 # Lista de testes WebSocket
 WS_TESTS = test_room_broadcast test_cluster_s2s test_cluster_gossip_mesh test_passive_client test_active_client test_pm_server test_pm_bob test_pm_eve test_pm_alice cluster_simple cluster_complex test_security_extreme
@@ -69,3 +69,25 @@ clean:
 	rm -f *.o *.d
 	@find . -maxdepth 1 -type f -executable -not -name "*.*" -delete
 
+## Compila e executa todos os testes sequencialmente (com timeout de 15s por teste)
+.PHONY: test-all
+test-all: tests
+	@echo "==========================================="
+	@echo "  Executando todos os testes..."
+	@echo "==========================================="
+	@PASSED=0; FAILED=0; TOTAL=0; \
+	for t in $(TESTS); do \
+		TOTAL=$$((TOTAL + 1)); \
+		echo "[RUN] $$t"; \
+		if timeout 15 ./$$t 2>&1; then \
+			echo "[OK]  $$t"; \
+			PASSED=$$((PASSED + 1)); \
+		else \
+			echo "[FAIL] $$t (exit $$?)"; \
+			FAILED=$$((FAILED + 1)); \
+		fi; \
+	done; \
+	echo "===========================================";\
+	echo "  Resultado: $$PASSED/$$TOTAL passaram, $$FAILED falharam"; \
+	echo "===========================================";\
+	if [ $$FAILED -gt 0 ]; then exit 1; fi

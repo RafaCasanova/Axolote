@@ -6,17 +6,18 @@ use std::env;
 
 /// Handler complexo mostrando roteamento de mensagens privadas, salas multiplas
 /// e uso de metadados na malha de cluster S2S.
-fn complex_chat_handler(mut conn: WsConnection, hub: WsHub) {
+fn complex_chat_handler(conn: &mut WsConnection, hub: WsHub) {
     // Sala padrao
+    let id = conn.id();
     conn.join("global");
-    conn.set_metadata("nick", &format!("User_{}", conn.id()));
+    conn.set_metadata("nick", &format!("User_{}", id));
 
     let join_msg = format!(">>> {} entrou no chat global <<<", conn.get_metadata("nick").unwrap());
     hub.broadcast_to_room("global", &join_msg);
 
-    while let Some(msg) = conn.receive() {
+    conn.on_message(|id, hub, msg| {
         if let WsMessage::Text(texto) = msg {
-            let nick = conn.get_metadata("nick").unwrap();
+            let nick = hub.get_client_metadata(id, "nick").unwrap();
             let mut parts = texto.splitn(3, ' ');
             let command = parts.next().unwrap_or("");
 
@@ -24,23 +25,23 @@ fn complex_chat_handler(mut conn: WsConnection, hub: WsHub) {
                 "/nick" => {
                     if let Some(new_nick) = parts.next() {
                         let old_nick = nick.clone();
-                        conn.set_metadata("nick", new_nick);
+                        hub.set_client_metadata(id, "nick", new_nick);
                         let alert = format!("*** {} mudou o nome para {} ***", old_nick, new_nick);
                         hub.broadcast_to_room("global", &alert);
                     } else {
-                        conn.send("Uso: /nick <novo_nome>");
+                        hub.send_to(id, "Uso: /nick <novo_nome>");
                     }
                 }
                 "/join" => {
                     if let Some(room) = parts.next() {
-                        conn.join(room);
-                        conn.send(&format!("Você entrou na sala '{}'", room));
+                        hub.join_room(id, room);
+                        hub.send_to(id, &format!("Você entrou na sala '{}'", room));
                     }
                 }
                 "/leave" => {
                     if let Some(room) = parts.next() {
-                        conn.leave(room);
-                        conn.send(&format!("Você saiu da sala '{}'", room));
+                        hub.leave_room(id, room);
+                        hub.send_to(id, &format!("Você saiu da sala '{}'", room));
                     }
                 }
                 "/pm" => {
@@ -52,21 +53,21 @@ fn complex_chat_handler(mut conn: WsConnection, hub: WsHub) {
                             // Tenta enviar para o alvo (pode estar em qualquer nó do cluster!)
                             let delivered = hub.send_to(target_id, &formatted_pm);
                             if delivered {
-                                conn.send(&format!("PM enviado para {}.", target_id));
+                                hub.send_to(id, &format!("PM enviado para {}.", target_id));
                             } else {
-                                conn.send(&format!("Usuário {} não encontrado ou rede inoperante.", target_id));
+                                hub.send_to(id, &format!("Usuário {} não encontrado ou rede inoperante.", target_id));
                             }
                         }
                     } else {
-                        conn.send("Uso: /pm <id> <mensagem>");
+                        hub.send_to(id, "Uso: /pm <id> <mensagem>");
                     }
                 }
                 "/shout" => {
                     // Envia para todos na sala global, EXCETO eu mesmo
                     let shout = parts.collect::<Vec<&str>>().join(" ");
                     let formatted_shout = format!("📢 {} Grita: {}", nick, shout);
-                    hub.broadcast_to_room_except("global", conn.id(), &formatted_shout);
-                    conn.send("Grito ecoado pela malha global!");
+                    hub.broadcast_to_room_except("global", id, &formatted_shout);
+                    hub.send_to(id, "Grito ecoado pela malha global!");
                 }
                 _ => {
                     // Mensagem padrao enviada ao global
@@ -75,10 +76,12 @@ fn complex_chat_handler(mut conn: WsConnection, hub: WsHub) {
                 }
             }
         }
-    }
+    });
     
-    let leave_msg = format!("<<< {} desconectou <<<", conn.get_metadata("nick").unwrap());
-    hub.broadcast_to_room("global", &leave_msg);
+    conn.on_close(|id, hub, _code| {
+        let leave_msg = format!("<<< {} desconectou <<<", hub.get_client_metadata(id, "nick").unwrap_or_default());
+        hub.broadcast_to_room("global", &leave_msg);
+    });
 }
 
 fn main() {

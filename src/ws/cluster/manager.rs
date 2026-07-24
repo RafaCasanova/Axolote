@@ -65,8 +65,9 @@ impl ClusterManager {
         for stream in listener.incoming() {
             match stream {
                 Ok(mut tcp_stream) => {
-                    // Le o handshake do peer (1 byte: node_id)
-                    if let Some(remote_id) = peer::read_handshake(&mut tcp_stream) {
+                    // Le o handshake do peer (1 byte: node_id + 20 bytes HMAC)
+                    let secret = cfg.cluster_secret.as_ref().map(|s| s.as_bytes());
+                    if let Some(remote_id) = peer::read_handshake(&mut tcp_stream, secret) {
                         // Verifica se ja temos este peer conectado
                         let already_connected = {
                             let inner = state.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -75,7 +76,7 @@ impl ClusterManager {
 
                         if !already_connected {
                             // Envia nosso node_id de volta (Handshake do Listener)
-                            peer::send_handshake(&mut tcp_stream, cfg.node_id);
+                            peer::send_handshake(&mut tcp_stream, cfg.node_id, secret);
                             
                             let sender = peer::spawn_peer_threads(
                                 tcp_stream,
@@ -99,10 +100,11 @@ impl ClusterManager {
                 // Verifica se ja estamos conectados a este peer
                 // (nao temos como saber o node_id a priori, entao tentamos conectar)
                 if let Ok(mut stream) = TcpStream::connect(peer_addr) {
+                    let secret = cfg.cluster_secret.as_ref().map(|s| s.as_bytes());
                     // Envia nosso node_id como handshake
-                    if peer::send_handshake(&mut stream, cfg.node_id) {
+                    if peer::send_handshake(&mut stream, cfg.node_id, secret) {
                         // Le o node_id do peer
-                        if let Some(remote_id) = peer::read_handshake(&mut stream) {
+                        if let Some(remote_id) = peer::read_handshake(&mut stream, secret) {
                             let already_connected = {
                                 let inner = state.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                                 inner.peers.contains_key(&remote_id)

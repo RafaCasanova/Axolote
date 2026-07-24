@@ -7,13 +7,13 @@ use axolote::Server;
 use axolote::ws::{WsConnection, WsMode, WsMessage, WsHub};
 use axolote::ws::cluster::ClusterConfig;
 
-fn chat_handler(mut conn: WsConnection, hub: WsHub) {
+fn chat_handler(conn: &mut WsConnection, hub: WsHub) {
     conn.join("lobby");
-    while let Some(msg) = conn.receive() {
+    conn.on_message(|_id, hub, msg| {
         if let WsMessage::Text(text) = msg {
             hub.broadcast_to_room("lobby", &text);
         }
-    }
+    });
 }
 
 fn create_client(port: &str, name: &str) -> TcpStream {

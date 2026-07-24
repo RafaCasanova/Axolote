@@ -17,7 +17,7 @@ fn main() {
 
     println!("EVE: Conectada! (Deveria ser o ID 2). Tentando interceptar a mensagem de Bob...");
 
-    while let Some(f) = frame::read_frame(&mut stream, 65536) {
+    while let Some(f) = frame::read_frame(&mut stream, 65536, false) {
         if f.opcode == Opcode::Text {
             let text = String::from_utf8_lossy(&f.payload).to_string();
             println!("🚨 EVE INTERCEPTOU: {}", text);

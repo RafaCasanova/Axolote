@@ -5,18 +5,18 @@ use axolote::ws::{WsConnection, WsMode, WsMessage, WsHub, WsRouteConfig};
 use axolote::ws::security::WsSecurityGuard;
 use std::sync::Arc;
 
-fn secure_chat_handler(mut conn: WsConnection, _hub: WsHub) {
+fn secure_chat_handler(conn: &mut WsConnection, _hub: WsHub) {
     conn.send("Acesso Autorizado! Você passou por todas as barreiras de segurança do Handshake.");
 
-    while let Some(msg) = conn.receive() {
+    conn.on_message(|id, hub_ref, msg| {
         match msg {
             WsMessage::Text(t) => {
-                println!("Cliente [{}] enviou: {}", conn.id(), t);
-                conn.send(&format!("Recebido: {}", t));
+                println!("Cliente [{}] enviou: {}", id, t);
+                hub_ref.send_to(id, &format!("Recebido: {}", t));
             }
             _ => {}
         }
-    }
+    });
 }
 
 fn main() {

@@ -12,7 +12,7 @@ fn info_handler(req: HttpRequest) -> HttpResponse {
 }
 
 fn create_user_handler(req: HttpRequest) -> HttpResponse {
-    let body_content = req.body;
+    let body_content = req.body_utf8();
     HttpResponse::created(format!("Usuario criado com sucesso. Dados: {}", body_content))
 }
 

@@ -6,6 +6,7 @@ pub enum JsonValue {
     Null,
     Boolean(bool),
     Number(f64),
+    Integer(i64),
     String(String),
     Array(Vec<JsonValue>),
     Object(HashMap<String, JsonValue>),
@@ -16,7 +17,15 @@ impl fmt::Display for JsonValue {
         match self {
             JsonValue::Null => write!(f, "null"),
             JsonValue::Boolean(b) => write!(f, "{}", b),
-            JsonValue::Number(n) => write!(f, "{}", n),
+            JsonValue::Number(n) => {
+                // Formatar sem .0 desnecessario quando o valor e inteiro
+                if *n == (*n as i64) as f64 && n.is_finite() {
+                    write!(f, "{}", *n as i64)
+                } else {
+                    write!(f, "{}", n)
+                }
+            }
+            JsonValue::Integer(n) => write!(f, "{}", n),
             JsonValue::String(s) => {
                 // Escape simple characters
                 let escaped = s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t");
@@ -110,6 +119,7 @@ macro_rules! impl_json_for_num {
                 fn from_json_value(val: &JsonValue) -> Result<Self, String> {
                     match val {
                         JsonValue::Number(n) => Ok(*n as $t),
+                        JsonValue::Integer(n) => Ok(*n as $t),
                         _ => Err(format!("Esperava {}", stringify!($t))),
                     }
                 }
@@ -306,9 +316,30 @@ fn parse_string(chars: &[char], pos: &mut usize) -> Result<String, String> {
                 'r' => s.push('\r'),
                 't' => s.push('\t'),
                 'u' => {
-                    // Ignorando escape unicode por simplicidade para não usar dependências extras
-                    *pos += 4; // avança 4 posições
-                    s.push('?');
+                    // RFC 8259 Sec 7: \uXXXX escape (BMP) e surrogate pairs para codepoints > U+FFFF
+                    let cp = parse_hex4(chars, pos)?;
+                    let codepoint = if (0xD800..=0xDBFF).contains(&cp) {
+                        // High surrogate: deve ser seguido por \uDC00-\uDFFF
+                        *pos += 1;
+                        if *pos + 5 >= chars.len() || chars[*pos] != '\\' || chars[*pos + 1] != 'u' {
+                            return Err("Surrogate pair incompleto".to_string());
+                        }
+                        *pos += 2; // avanca '\\' e 'u'
+                        let low = parse_hex4(chars, pos)?;
+                        if !(0xDC00..=0xDFFF).contains(&low) {
+                            return Err(format!("Low surrogate invalido: {:04X}", low));
+                        }
+                        // Reconstituir codepoint: (high - 0xD800) * 0x400 + (low - 0xDC00) + 0x10000
+                        (cp as u32 - 0xD800) * 0x400 + (low as u32 - 0xDC00) + 0x10000
+                    } else if (0xDC00..=0xDFFF).contains(&cp) {
+                        return Err(format!("Low surrogate inesperado: {:04X}", cp));
+                    } else {
+                        cp as u32
+                    };
+                    match char::from_u32(codepoint) {
+                        Some(ch) => s.push(ch),
+                        None => return Err(format!("Codepoint unicode invalido: U+{:04X}", codepoint)),
+                    }
                 }
                 c => return Err(format!("Escape inválido: \\{}", c)),
             }
@@ -371,8 +402,29 @@ fn parse_number(chars: &[char], pos: &mut usize) -> Result<JsonValue, String> {
         }
     }
     let num_str: String = chars[start..*pos].iter().collect();
+    // Se o numero nao tem ponto decimal nem expoente, tenta parsear como inteiro
+    // para preservar precisao (i64 tem 63 bits vs. f64 com 53 bits de mantissa).
+    let has_decimal = num_str.contains('.') || num_str.contains('e') || num_str.contains('E');
+    if !has_decimal {
+        if let Ok(n) = num_str.parse::<i64>() {
+            return Ok(JsonValue::Integer(n));
+        }
+    }
     match num_str.parse::<f64>() {
         Ok(n) => Ok(JsonValue::Number(n)),
-        Err(_) => Err(format!("Número inválido: {}", num_str)),
+        Err(_) => Err(format!("Numero invalido: {}", num_str)),
     }
+}
+
+/// Le exatamente 4 digitos hexadecimais a partir da posicao atual e retorna o valor u16.
+/// Avanca `pos` em 4 posicoes.
+fn parse_hex4(chars: &[char], pos: &mut usize) -> Result<u16, String> {
+    *pos += 1; // avanca apos o 'u'
+    if *pos + 3 >= chars.len() {
+        return Err("Escape \\u incompleto".to_string());
+    }
+    let hex_str: String = chars[*pos..*pos + 4].iter().collect();
+    *pos += 3; // avanca ate o ultimo digito (o loop externo fara +1)
+    u16::from_str_radix(&hex_str, 16)
+        .map_err(|_| format!("Sequencia hex invalida em \\u: {}", hex_str))
 }

@@ -476,7 +476,7 @@ impl WsHub {
     }
 
     /// Adiciona um cliente a uma sala
-    pub(crate) fn join_room(&self, id: u64, room: &str) {
+    pub fn join_room(&self, id: u64, room: &str) {
         {
             let mut shard = self.get_shard(id);
             if let Some(client) = shard.clients.get_mut(&id) {
@@ -493,7 +493,7 @@ impl WsHub {
     }
 
     /// Remove um cliente de uma sala
-    pub(crate) fn leave_room(&self, id: u64, room: &str) {
+    pub fn leave_room(&self, id: u64, room: &str) {
         let mut shard = self.get_shard(id);
         if let Some(client) = shard.clients.get_mut(&id) {
             client.rooms.remove(room);
@@ -501,7 +501,7 @@ impl WsHub {
     }
 
     /// Define um metadado para um cliente
-    pub(crate) fn set_client_metadata(&self, id: u64, key: &str, value: &str) {
+    pub fn set_client_metadata(&self, id: u64, key: &str, value: &str) {
         let mut shard = self.get_shard(id);
         if let Some(client) = shard.clients.get_mut(&id) {
             client.metadata.insert(key.to_string(), value.to_string());
@@ -509,7 +509,7 @@ impl WsHub {
     }
 
     /// Lê um metadado de um cliente
-    pub(crate) fn get_client_metadata(&self, id: u64, key: &str) -> Option<String> {
+    pub fn get_client_metadata(&self, id: u64, key: &str) -> Option<String> {
         let shard = self.get_shard(id);
         shard.clients.get(&id).and_then(|c| c.metadata.get(key).cloned())
     }

@@ -40,10 +40,10 @@ fn main() {
     let msg = "Ola! Esta eh uma mensagem secreta de teste enviada pelo Cliente Ativo.";
     println!("Enviando: '{}'", msg);
 
-    frame::write_frame(&mut stream, Opcode::Text, msg.as_bytes());
+    frame::write_client_frame(&mut stream, Opcode::Text, msg.as_bytes());
 
     // Vamos enviar o frame de close pra sair bonitinho
-    frame::write_frame(&mut stream, Opcode::Close, &1000u16.to_be_bytes());
+    frame::write_client_frame(&mut stream, Opcode::Close, &1000u16.to_be_bytes());
     
     println!("Mensagem enviada e conexão fechada com sucesso!");
 }

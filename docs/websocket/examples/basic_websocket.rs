@@ -4,7 +4,7 @@ use axolote::http::{HttpMethod, HttpRequest, HttpResponse};
 use axolote::ws::{WsConnection, WsMode, WsMessage, WsHub, WsRouteConfig};
 
 /// Handler WebSocket Bidirecional — Chat com Salas e Broadcast
-fn handler_chat(mut conn: WsConnection, hub: WsHub) {
+fn handler_chat(conn: &mut WsConnection, hub: WsHub) {
     // 1. Cliente entra na sala "geral" e anuncia sua chegada
     let id = conn.id();
     conn.join("geral");
@@ -16,52 +16,41 @@ fn handler_chat(mut conn: WsConnection, hub: WsHub) {
     // Dá boas-vindas específicas só para ele
     conn.send("Bem-vindo ao Chat Global do Chips In Hand! Você está na sala 'geral'.");
 
-    loop {
-        match conn.receive() {
-            Some(WsMessage::Text(msg)) => {
-                println!("[WS Chat] [ID:{}] Recebido: {}", id, msg);
+    conn.on_message(|id, hub, msg| {
+        match msg {
+            WsMessage::Text(text) => {
+                println!("[WS Chat] [ID:{}] Recebido: {}", id, text);
 
                 // Comandos Especiais
-                if msg.starts_with("/nome ") {
-                    let new_name = msg.replace("/nome ", "");
-                    conn.set_metadata("username", &new_name);
-                    conn.send(&format!("Seu nome agora é {}", new_name));
-                    continue;
+                if text.starts_with("/nome ") {
+                    let new_name = text.replace("/nome ", "");
+                    hub.set_client_metadata(id, "username", &new_name);
+                    hub.send_to(id, &format!("Seu nome agora é {}", new_name));
+                    return;
                 }
                 
-                if msg == "/online" {
-                    conn.send(&format!("Total de usuários online no servidor: {}", hub.count()));
-                    continue;
+                if text == "/online" {
+                    hub.send_to(id, &format!("Total de usuários online no servidor: {}", hub.count()));
+                    return;
                 }
 
                 // Ecoa a mensagem para TODOS na sala, EXCETO ele mesmo
-                let username = conn.get_metadata("username").unwrap();
-                let texto_formatado = format!("[{}] diz: {}", username, msg);
+                let username = hub.get_client_metadata(id, "username").unwrap();
+                let texto_formatado = format!("[{}] diz: {}", username, text);
                 hub.broadcast_to_room_except("geral", id, &texto_formatado);
                 
                 // Manda de volta pra ele confirmando (apenas pra ele ver)
-                conn.send(&format!("Você: {}", msg));
-            }
-            Some(WsMessage::Close(_code)) => {
-                println!("[WS Chat] [ID:{}] Cliente solicitou fechamento.", id);
-                let username = conn.get_metadata("username").unwrap();
-                hub.broadcast_to_room("geral", &format!("🔈 O {} saiu do chat.", username));
-                conn.close();
-                break;
-            }
-            Some(WsMessage::Ping) => {
-                // Ping do cliente. Pong é respondido nativamente pela WsConnection.
-            }
-            None => {
-                // Caiu a conexão inesperadamente (ou heartbeat derrubou o zumbi)
-                println!("[WS Chat] [ID:{}] Conexão caiu.", id);
-                let username = conn.get_metadata("username").unwrap_or_default();
-                hub.broadcast_to_room("geral", &format!("🔈 O {} caiu...", username));
-                break;
+                hub.send_to(id, &format!("Você: {}", text));
             }
             _ => {}
         }
-    }
+    });
+
+    conn.on_close(|id, hub, _code| {
+        println!("[WS Chat] [ID:{}] Cliente solicitou fechamento ou caiu.", id);
+        let username = hub.get_client_metadata(id, "username").unwrap_or_default();
+        hub.broadcast_to_room("geral", &format!("🔈 O {} saiu do chat.", username));
+    });
 }
 
 /// Handler HTTP normal para mostrar uma página de teste
@@ -110,7 +99,7 @@ fn handler_pagina_teste(_req: HttpRequest) -> HttpResponse {
 </html>"#;
 
     let mut response = HttpResponse::ok(html);
-    response.headers.insert("Content-Type".to_string(), "text/html; charset=utf-8".to_string());
+    response.headers.push(("Content-Type".to_string(), "text/html; charset=utf-8".to_string()));
     response
 }
 

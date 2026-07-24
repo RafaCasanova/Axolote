@@ -1,11 +1,11 @@
 use super::http::{HttpMethod, HttpRequest, HttpResponse};
-use super::route::{HandlerFn, Route};
+use super::route::Route;
 
 /// Assinatura do middleware.
 /// Recebe a requisição por referência e retorna:
 ///   - None       → requisição liberada, continua para o handler
 ///   - Some(resp) → requisição bloqueada, retorna essa resposta imediatamente
-pub type MiddlewareFn = fn(&HttpRequest) -> Option<HttpResponse>;
+pub type MiddlewareFn = Box<dyn Fn(&HttpRequest) -> Option<HttpResponse> + Send + Sync>;
 
 /// Grupo de rotas com um prefixo comum e um middleware opcional.
 /// Exemplo: grupo "/cliente" com middleware de autenticação
@@ -28,13 +28,19 @@ impl RouteGroup {
     }
 
     /// Define um middleware para o grupo. Opcional — se não chamar, o grupo funciona sem.
-    pub fn set_middleware(&mut self, middleware: MiddlewareFn) {
-        self.middleware = Some(middleware);
+    pub fn set_middleware<F>(&mut self, middleware: F)
+    where
+        F: Fn(&HttpRequest) -> Option<HttpResponse> + Send + Sync + 'static,
+    {
+        self.middleware = Some(Box::new(middleware));
     }
 
     /// Adiciona uma rota ao grupo. O path informado é relativo ao prefixo do grupo.
     /// Exemplo: grupo "/cliente" + path "/{id}" = rota final "/cliente/{id}"
-    pub fn add_route(&mut self, method: HttpMethod, path: &str, handler: HandlerFn) {
+    pub fn add_route<F>(&mut self, method: HttpMethod, path: &str, handler: F)
+    where
+        F: Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static,
+    {
         let full_path = format!("{}{}", self.prefix, path);
         self.routes.entry(method.clone()).or_insert_with(Vec::new).push(Route::new(method, &full_path, handler));
     }

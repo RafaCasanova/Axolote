@@ -48,11 +48,14 @@ pub struct ClusterState {
     pub node_id: u8,
     /// Contador sequencial atomico para mensagens originadas neste no
     pub message_counter: Arc<AtomicU64>,
+    /// Segredo compartilhado opcional
+    pub cluster_secret: Option<Arc<Vec<u8>>>,
 }
 
 impl ClusterState {
     /// Cria um novo estado de cluster vazio
-    pub fn new(node_id: u8) -> Self {
+    pub fn new(node_id: u8, secret: Option<String>) -> Self {
+        let cluster_secret = secret.map(|s| Arc::new(s.into_bytes()));
         ClusterState {
             inner: Arc::new(Mutex::new(ClusterStateInner {
                 presence: HashMap::new(),
@@ -63,6 +66,7 @@ impl ClusterState {
             })),
             node_id,
             message_counter: Arc::new(AtomicU64::new(1)),
+            cluster_secret,
         }
     }
 
@@ -176,7 +180,8 @@ impl ClusterState {
 
     /// Envia um envelope codificado para todos os peers conectados
     pub fn forward_to_all_peers(&self, envelope: &S2sEnvelope) {
-        let encoded = envelope.encode();
+        let secret = self.cluster_secret.as_ref().map(|s| s.as_slice());
+        let encoded = envelope.encode(secret);
         let len_bytes = (encoded.len() as u32).to_be_bytes();
         let mut full_msg = Vec::with_capacity(4 + encoded.len());
         full_msg.extend_from_slice(&len_bytes);
@@ -193,7 +198,8 @@ impl ClusterState {
 
     /// Envia um envelope codificado para todos os peers conectados, exceto um no especifico
     pub fn forward_to_all_peers_except(&self, envelope: &S2sEnvelope, exclude_node_id: u8) {
-        let encoded = envelope.encode();
+        let secret = self.cluster_secret.as_ref().map(|s| s.as_slice());
+        let encoded = envelope.encode(secret);
         let len_bytes = (encoded.len() as u32).to_be_bytes();
         let mut full_msg = Vec::with_capacity(4 + encoded.len());
         full_msg.extend_from_slice(&len_bytes);
@@ -210,7 +216,8 @@ impl ClusterState {
 
     /// Envia um envelope codificado para um peer especifico
     pub fn forward_to_peer(&self, target_node_id: u8, envelope: &S2sEnvelope) -> bool {
-        let encoded = envelope.encode();
+        let secret = self.cluster_secret.as_ref().map(|s| s.as_slice());
+        let encoded = envelope.encode(secret);
         let len_bytes = (encoded.len() as u32).to_be_bytes();
         let mut full_msg = Vec::with_capacity(4 + encoded.len());
         full_msg.extend_from_slice(&len_bytes);

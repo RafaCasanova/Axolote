@@ -24,6 +24,9 @@ pub struct ClusterConfig {
     /// Numero de heartbeats perdidos antes de declarar um no como morto.
     /// Padrao: 3 (total = heartbeat_interval * missed = 6 segundos).
     pub heartbeat_missed_limit: u64,
+    
+    /// Segredo compartilhado opcional para assinar envelopes via HMAC-SHA1.
+    pub cluster_secret: Option<String>,
 }
 
 impl ClusterConfig {
@@ -35,6 +38,13 @@ impl ClusterConfig {
             peers,
             heartbeat_interval_secs: 2,
             heartbeat_missed_limit: 3,
+            cluster_secret: None,
         }
+    }
+
+    /// Configura uma senha compartilhada para comunicação segura S2S.
+    pub fn with_secret(mut self, secret: &str) -> Self {
+        self.cluster_secret = Some(secret.to_string());
+        self
     }
 }

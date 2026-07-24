@@ -7,6 +7,8 @@ pub enum HttpMethod {
     DELETE,
     PATCH,
     CONNECT,
+    OPTIONS,
+    HEAD,
     UNKNOWN(String),
 }
 
@@ -19,6 +21,8 @@ impl HttpMethod {
             "DELETE" => HttpMethod::DELETE,
             "PATCH" => HttpMethod::PATCH,
             "CONNECT" => HttpMethod::CONNECT,
+            "OPTIONS" => HttpMethod::OPTIONS,
+            "HEAD" => HttpMethod::HEAD,
             other => HttpMethod::UNKNOWN(other.to_string()),
         }
     }

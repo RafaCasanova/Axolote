@@ -48,10 +48,10 @@ O cluster e configurado usando a struct `ClusterConfig` e inicializado atraves d
 pub struct ClusterConfig {
     pub node_id: u8,
     pub s2s_port: String,
-    pub seed_nodes: Vec<String>,
+    pub peers: Vec<String>,
     pub heartbeat_interval_secs: u64,
-    pub heartbeat_missed_limit: u32,
-    pub max_seen_messages_cache: usize,
+    pub heartbeat_missed_limit: u64,
+    pub cluster_secret: Option<String>,
 }
 ```
 
@@ -59,10 +59,10 @@ pub struct ClusterConfig {
 
 1. **`node_id` (u8):** Identificador unico do nó dentro do cluster. Cada servidor rodando na malha deve obrigatoriamente possuir um ID distinto (ex: 1, 2, 3...).
 2. **`s2s_port` (String/&str):** Porta TCP em que o nó local ira escutar as conexoes de outros servidores (S2S).
-3. **`seed_nodes` (Vec<String>):** Lista de enderecos de outros nos conhecidos na rede (`IP:Porta_S2S`) aos quais este nó tentara se conectar ativamente durante a inicializacao.
-4. **`heartbeat_interval_secs` (u64):** Intervalo em segundos em que o nó envia pacotes de batimento cardiaco (Ping) para os peers conectados. Padrao recomendavel: `5`.
-5. **`heartbeat_missed_limit` (u32):** Numero maximo de batimentos cardiacos perdidos sucessivamente antes de declarar a conexao com o peer remetente como morta e forcar desconexao. Padrao: `3`.
-6. **`max_seen_messages_cache` (usize):** Tamanho do cache de deduplicacao. Padrao: `100_000`.
+3. **`peers` (Vec<String>):** Lista de enderecos de outros nos conhecidos na rede (`IP:Porta_S2S`) aos quais este nó tentara se conectar ativamente durante a inicializacao.
+4. **`heartbeat_interval_secs` (u64):** Intervalo em segundos em que o nó envia pacotes de batimento cardiaco (Ping) para os peers conectados. Padrao recomendavel: `2`.
+5. **`heartbeat_missed_limit` (u64):** Numero maximo de batimentos cardiacos perdidos sucessivamente antes de declarar a conexao com o peer remetente como morta e forcar desconexao. Padrao: `3`.
+6. **`cluster_secret` (Option<String>):** Senha compartilhada do cluster. Quando configurada, as conexões entre nós exigirão uma assinatura HMAC-SHA1 no handshake e em todos os pacotes transitados. Impede ataques de *Spoofing*. (Pode ser injetada via builder `.with_secret()`).
 
 ---
 
@@ -153,13 +153,19 @@ fn main() {
 
 A comunicacao de rede entre os nós utiliza pacotes serializados manualmente para velocidade e economia de recursos:
 
+**Handshake**: 
+Na fase de conexão, os nós trocam pacotes minúsculos de 1 byte (Node ID) ou 21 bytes (Node ID + 20 bytes HMAC-SHA1) se o *secret* estiver configurado. Nenhuma conexão entra no cluster sem um Handshake válido.
+
+**S2sEnvelope (Pacotes Transitados)**:
 | Campo | Tipo | Descricao |
 | :--- | :--- | :--- |
-| **Magic Byte** | `u8` | Prefixo identificador fixo `0x53` |
-| **Message Type** | `u8` | `1` para Handshake, `2` para PresenceUpdate, `3` para Broadcast, `4` para PrivateMessage, `5` para S2sPing, `6` para S2sPong |
+| **Message Type** | `u8` | `1` para PresenceUpdate, `2` para Broadcast, `3` para PrivateMessage, `4` para S2sPing, `5` para S2sPong |
 | **Node Origin** | `u8` | ID do nó de origem da acao |
-| **Message Seq** | `u32` | Sequencia incremental de mensagens para deduplicacao |
+| **Message Seq** | `u64` | Sequencia incremental de mensagens para deduplicacao |
+| **Target Length** | `u32` | Tamanho do campo Target em bytes |
+| **Target** | `Vec<u8>` | Destinatário da mensagem (ex: nome da sala, id de conexão) |
 | **Payload Length** | `u32` | Tamanho do payload subsequente em bytes |
 | **Payload** | `Vec<u8>` | Bytes de dados do payload |
+| **HMAC Signature** | `[u8; 20]` | Se o segredo existir, adiciona 20 bytes finais com o MAC validando Origin, Seq, Target e Payload |
 
 Qualquer interrupcao ou dados recebidos fora da estrutura esperada resultam no fechamento da conexao imediato por motivos de seguranca.

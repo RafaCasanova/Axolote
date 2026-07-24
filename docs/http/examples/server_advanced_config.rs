@@ -17,7 +17,7 @@ fn handler_404_custom(_req: HttpRequest) -> HttpResponse {
     "#;
     
     let mut res = HttpResponse::not_found(html);
-    res.headers.insert("Content-Type".to_string(), "text/html; charset=utf-8".to_string());
+    res.headers.push(("Content-Type".to_string(), "text/html; charset=utf-8".to_string()));
     res
 }
 

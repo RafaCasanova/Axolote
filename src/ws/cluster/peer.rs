@@ -38,11 +38,13 @@ pub fn spawn_peer_threads(
     let read_cluster = cluster_state.clone();
     let read_hub = hub.clone();
     let mut read_stream = stream;
+    let secret = cluster_state.cluster_secret.clone();
     let _ = thread::Builder::new()
         .stack_size(64 * 1024)
         .spawn(move || {
             loop {
-                match envelope::read_envelope(&mut read_stream) {
+                let s_ref = secret.as_ref().map(|s| s.as_slice());
+                match envelope::read_envelope(&mut read_stream, s_ref) {
                     Some(env) => {
                         process_incoming_envelope(env, remote_node_id, &read_cluster, &read_hub);
                     }
@@ -154,19 +156,40 @@ fn process_incoming_envelope(
 }
 
 /// Realiza o handshake inicial entre dois nos do cluster.
-/// O no que inicia a conexao envia seu node_id como primeiro byte.
-/// Retorna o node_id do peer remoto.
-pub fn send_handshake(stream: &mut TcpStream, my_node_id: u8) -> bool {
-    stream.write_all(&[my_node_id]).is_ok()
+/// O no que inicia a conexao envia seu node_id como primeiro byte,
+/// seguido pelo HMAC_SHA1 do node_id se um secret estiver configurado.
+pub fn send_handshake(stream: &mut TcpStream, my_node_id: u8, secret: Option<&[u8]>) -> bool {
+    let mut data = vec![my_node_id];
+    if let Some(key) = secret {
+        let mac = crate::ws::crypto::hmac_sha1(key, &[my_node_id]);
+        data.extend_from_slice(&mac);
+    }
+    stream.write_all(&data).is_ok()
 }
 
-/// Le o handshake do peer (1 byte: node_id)
-pub fn read_handshake(stream: &mut TcpStream) -> Option<u8> {
+/// Le o handshake do peer (1 byte: node_id, opcional 20 bytes HMAC)
+pub fn read_handshake(stream: &mut TcpStream, secret: Option<&[u8]>) -> Option<u8> {
     let mut buf = [0u8; 1];
     use std::io::Read;
-    if stream.read_exact(&mut buf).is_ok() {
-        Some(buf[0])
-    } else {
-        None
+    if stream.read_exact(&mut buf).is_err() {
+        return None;
     }
+    let node_id = buf[0];
+
+    if let Some(key) = secret {
+        let mut mac_buf = [0u8; 20];
+        if stream.read_exact(&mut mac_buf).is_err() {
+            return None; // Conexao caiu ou peer malicioso
+        }
+        let expected_mac = crate::ws::crypto::hmac_sha1(key, &[node_id]);
+        let mut diff = 0;
+        for (x, y) in expected_mac.iter().zip(mac_buf.iter()) {
+            diff |= x ^ y;
+        }
+        if diff != 0 {
+            return None; // Spoofing detectado no Handshake
+        }
+    }
+
+    Some(node_id)
 }

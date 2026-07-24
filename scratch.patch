@@ -1,0 +1,37 @@
+--- src/http/request.rs
++++ src/http/request.rs
+@@ -4,12 +4,11 @@
+ pub struct HttpRequest {
+     pub method: HttpMethod,
+     pub path: String,
+     pub params: HashMap<String, String>,
+     pub query_params: HashMap<String, String>,
+     pub headers: HashMap<String, String>,
+-    pub body: String,
++    pub body: Vec<u8>,
+ }
+ 
+ impl HttpRequest {
+-    pub fn from_raw(raw: &str) -> Option<Self> {
+-        let mut lines = raw.lines();
+-        let request_line = lines.next()?;
++    pub fn from_bytes(raw: &[u8]) -> Option<Self> {
++        let mut headers_end = 0;
++        for i in 0..raw.len().saturating_sub(3) {
++            if &raw[i..i+4] == b"\r\n\r\n" {
++                headers_end = i + 4;
++                break;
++            }
++        }
++        if headers_end == 0 {
++            for i in 0..raw.len().saturating_sub(1) {
++                if &raw[i..i+2] == b"\n\n" {
++                    headers_end = i + 2;
++                    break;
++                }
++            }
++        }
++        if headers_end == 0 { return None; }
++        let header_str = String::from_utf8_lossy(&raw[..headers_end]);
++        let mut lines = header_str.lines();
++        let request_line = lines.next()?;

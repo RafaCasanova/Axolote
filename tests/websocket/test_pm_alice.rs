@@ -25,9 +25,9 @@ fn main() {
     // Envia a PM para o Bob (ID 1)
     let msg = "TO:1:Oi Bob! Essa mensagem é estritamente confidencial para você.";
     println!("ALICE: Enviando -> '{}'", msg);
-    frame::write_frame(&mut stream, Opcode::Text, msg.as_bytes());
+    frame::write_client_frame(&mut stream, Opcode::Text, msg.as_bytes());
 
     // Fecha a conexão
-    frame::write_frame(&mut stream, Opcode::Close, &1000u16.to_be_bytes());
+    frame::write_client_frame(&mut stream, Opcode::Close, &1000u16.to_be_bytes());
     println!("ALICE: Mensagem enviada e conexão fechada.");
 }
