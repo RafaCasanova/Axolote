@@ -28,7 +28,7 @@ jobs:
         id: check_changes
         run: |
           # We add the files to index to see if they differ from HEAD
-          git add libaxolote.rlib libaxolote_macros.so
+          git add -f libaxolote.rlib libaxolote_macros.so
           if [[ -n "$(git status --porcelain libaxolote.rlib libaxolote_macros.so)" ]]; then
             echo "changed=true" >> $GITHUB_OUTPUT
           else
