@@ -141,6 +141,18 @@ impl ClusterState {
         state.local_rooms.insert(room.to_string());
     }
 
+    /// Remove o registro de presenca local de uma sala (quando nenhum cliente local esta nela)
+    pub fn unregister_local_room(&self, room: &str) {
+        let mut state = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.local_rooms.remove(room);
+        // Se este no era lider da sala, renuncia a lideranca
+        if let Some(&leader) = state.room_leaders.get(room) {
+            if leader == self.node_id {
+                state.room_leaders.remove(room);
+            }
+        }
+    }
+
     /// Registra ou atualiza o lider de uma sala
     pub fn set_room_leader(&self, room: &str, leader_node_id: u8) {
         let mut state = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());

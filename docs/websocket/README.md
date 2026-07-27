@@ -86,6 +86,41 @@ if let Some(user) = conn.get_metadata("username") {
 }
 ```
 
+### 3.1. Limpeza Automática de Salas Vazias (Room Cleanup)
+
+Quando salas são criadas dinamicamente (ex: partidas de jogo, sessões temporárias), elas podem acumular entradas órfãs em memória após todos os clientes desconectarem. O Hub possui um mecanismo nativo de limpeza que remove automaticamente as salas sem clientes.
+
+Por padrão, a limpeza roda **a cada 60 segundos**. O comportamento é totalmente configurável:
+
+```rust
+// Alterar o intervalo de limpeza para 120 segundos
+server.set_ws_room_cleanup_interval(120);
+
+// Desabilitar a limpeza automática (controle manual)
+server.disable_ws_room_cleanup();
+
+// Executar a limpeza manualmente a qualquer momento
+// (pode ser chamado de um handler HTTP de administração, por exemplo)
+server.ws_cleanup_rooms();
+```
+
+A limpeza também pode ser invocada diretamente pelo `WsHub` dentro de um handler WebSocket:
+
+```rust
+fn admin_handler(conn: &mut WsConnection, hub: WsHub) {
+    while let Some(msg) = conn.receive() {
+        if let WsMessage::Text(cmd) = msg {
+            if cmd == "/cleanup" {
+                hub.cleanup_empty_rooms();
+                conn.send("Salas vazias removidas da memoria.");
+            }
+        }
+    }
+}
+```
+
+Além da varredura periódica, o Hub também limpa salas individualmente em tempo real: quando um cliente desconecta (`unregister`) ou sai de uma sala (`leave`), o sistema verifica se a sala ficou sem clientes locais e a remove imediatamente das estruturas internas do cluster (`local_rooms` e `room_leaders`).
+
 ## 5. Arquitetura Distribuída e Clusterização (S2S)
 
 O módulo provê suporte a interconexão topológica (Node Mesh Cluster). Quando o modo cluster está ativado, a comunicação e o roteamento de salas são propagados entre os nós conectados.

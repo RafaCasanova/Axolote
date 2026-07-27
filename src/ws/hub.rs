@@ -42,7 +42,10 @@ struct HubInner {
 #[derive(Clone)]
 pub struct WsHub {
     shards: Arc<Vec<Mutex<HubInner>>>,
-    pub(crate) cluster_state: Option<ClusterState>, // NEW
+    pub(crate) cluster_state: Option<ClusterState>,
+    /// Intervalo em segundos entre limpezas automaticas de salas vazias.
+    /// None = limpeza automatica desabilitada. Default: Some(60).
+    room_cleanup_interval: Arc<Mutex<Option<u64>>>,
 }
 
 impl WsHub {
@@ -58,6 +61,7 @@ impl WsHub {
         let hub = WsHub {
             shards: Arc::new(shards),
             cluster_state: None,
+            room_cleanup_interval: Arc::new(Mutex::new(Some(60))),
         };
 
         // Inicia a thread global de timer (Feature 7 e Feature 6)
@@ -80,9 +84,11 @@ impl WsHub {
     fn timer_loop(&self) {
         let ping_frame = frame::encode_frame(Opcode::Ping, b"heartbeat");
         let shared_ping: Arc<[u8]> = Arc::from(ping_frame);
+        let mut cleanup_elapsed: u64 = 0;
 
         loop {
             thread::sleep(Duration::from_secs(1));
+            cleanup_elapsed += 1;
 
             let mut expired_ids = Vec::new();
 
@@ -115,6 +121,17 @@ impl WsHub {
             for id in expired_ids {
                 self.kick(id);
                 self.unregister(id);
+            }
+
+            // Limpeza periodica de salas vazias
+            let interval = {
+                *self.room_cleanup_interval.lock().unwrap_or_else(|p| p.into_inner())
+            };
+            if let Some(secs) = interval {
+                if secs > 0 && cleanup_elapsed >= secs {
+                    cleanup_elapsed = 0;
+                    self.cleanup_empty_rooms();
+                }
             }
         }
     }
@@ -162,11 +179,26 @@ impl WsHub {
         }
     }
 
-    /// Remove um cliente do Hub
+    /// Remove um cliente do Hub e limpa salas que ficaram vazias
     pub(crate) fn unregister(&self, id: u64) {
-        {
+        let client_rooms = {
             let mut shard = self.get_shard(id);
-            shard.clients.remove(&id);
+            if let Some(client) = shard.clients.remove(&id) {
+                client.rooms
+            } else {
+                HashSet::new()
+            }
+        };
+
+        // Limpa salas que ficaram orfas no cluster
+        if !client_rooms.is_empty() {
+            if let Some(state) = &self.cluster_state {
+                for room in &client_rooms {
+                    if self.room_count(room) == 0 {
+                        state.unregister_local_room(room);
+                    }
+                }
+            }
         }
         
         // Atualiza presenca no cluster
@@ -494,9 +526,17 @@ impl WsHub {
 
     /// Remove um cliente de uma sala
     pub fn leave_room(&self, id: u64, room: &str) {
-        let mut shard = self.get_shard(id);
-        if let Some(client) = shard.clients.get_mut(&id) {
-            client.rooms.remove(room);
+        {
+            let mut shard = self.get_shard(id);
+            if let Some(client) = shard.clients.get_mut(&id) {
+                client.rooms.remove(room);
+            }
+        }
+        // Se a sala ficou vazia localmente, limpar do cluster
+        if let Some(state) = &self.cluster_state {
+            if self.room_count(room) == 0 {
+                state.unregister_local_room(room);
+            }
         }
     }
 
@@ -532,5 +572,56 @@ impl WsHub {
             total += shard.clients.values().filter(|c| c.rooms.contains(room)).count();
         }
         total
+    }
+
+    // ========================================================================
+    // LIMPEZA DE SALAS VAZIAS
+    // ========================================================================
+
+    /// Define o intervalo (em segundos) entre limpezas automaticas de salas vazias.
+    /// Valor padrao: 60 segundos.
+    pub fn set_room_cleanup_interval(&self, secs: u64) {
+        let mut guard = self.room_cleanup_interval.lock().unwrap_or_else(|p| p.into_inner());
+        *guard = Some(secs);
+    }
+
+    /// Desabilita a limpeza automatica de salas vazias.
+    /// Util se o usuario quiser controlar manualmente via cleanup_empty_rooms().
+    pub fn disable_room_cleanup(&self) {
+        let mut guard = self.room_cleanup_interval.lock().unwrap_or_else(|p| p.into_inner());
+        *guard = None;
+    }
+
+    /// Remove salas que nao possuem mais nenhum cliente local.
+    /// Limpa entradas orfas de `local_rooms` e `room_leaders` do cluster.
+    /// Pode ser chamado manualmente a qualquer momento ou automaticamente pelo timer.
+    pub fn cleanup_empty_rooms(&self) {
+        // Fase 1: coletar todas as salas que possuem pelo menos 1 cliente local
+        let mut active_rooms: HashSet<String> = HashSet::new();
+        for shard_mutex in self.shards.iter() {
+            let shard = shard_mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            for client in shard.clients.values() {
+                for room in &client.rooms {
+                    active_rooms.insert(room.clone());
+                }
+            }
+        }
+
+        // Fase 2: limpar do cluster as salas que nao estao mais ativas
+        if let Some(state) = &self.cluster_state {
+            let mut inner = state.inner.lock().unwrap_or_else(|p| p.into_inner());
+            
+            // Remover de local_rooms as salas sem clientes
+            inner.local_rooms.retain(|room| active_rooms.contains(room));
+
+            // Remover de room_leaders as salas lideradas por este no que ficaram vazias
+            inner.room_leaders.retain(|room, &mut leader| {
+                if leader == state.node_id {
+                    active_rooms.contains(room)
+                } else {
+                    true // Manter lideranca de outros nos (eles cuidam dos proprios)
+                }
+            });
+        }
     }
 }

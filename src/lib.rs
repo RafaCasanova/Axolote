@@ -156,9 +156,27 @@ impl Server {
         self.static_dirs.push((route_prefix.to_string(), base_dir.to_string()));
     }
 
-    /// Define o timeout de leitura e escrita para as conexões TCP em segundos (padrão: 10s)
+    /// Define o timeout de leitura e escrita para as conexoes TCP em segundos (padrao: 10s)
     pub fn set_timeout(&mut self, seconds: u64) {
         self.timeout = std::time::Duration::from_secs(seconds);
+    }
+
+    /// Define o intervalo (em segundos) entre limpezas automaticas de salas WebSocket vazias.
+    /// Valor padrao: 60 segundos. Salas sem clientes serao removidas da memoria periodicamente.
+    pub fn set_ws_room_cleanup_interval(&self, secs: u64) {
+        self.ws_hub.set_room_cleanup_interval(secs);
+    }
+
+    /// Desabilita a limpeza automatica de salas WebSocket vazias.
+    /// O usuario pode chamar ws_cleanup_rooms() manualmente quando desejar.
+    pub fn disable_ws_room_cleanup(&self) {
+        self.ws_hub.disable_room_cleanup();
+    }
+
+    /// Limpa manualmente todas as salas WebSocket que nao possuem mais clientes conectados.
+    /// Remove entradas orfas de local_rooms e room_leaders do cluster.
+    pub fn ws_cleanup_rooms(&self) {
+        self.ws_hub.cleanup_empty_rooms();
     }
 
     /// Define um handler customizado para rotas 404 (Not Found)
