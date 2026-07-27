@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use crate::http::{HttpMethod, HttpRequest, HttpResponse};
+use crate::http::HttpMethod;
 use crate::route::HandlerFn;
+use std::collections::HashMap;
 
 pub struct RadixNode {
     pub handlers: HashMap<HttpMethod, HandlerFn>,
@@ -64,17 +64,24 @@ impl RadixTree {
                     current_node = &mut current_node.param_children[last_idx];
                 }
             } else {
-                current_node = current_node.static_children.entry(part.to_string()).or_insert_with(RadixNode::new);
+                current_node = current_node
+                    .static_children
+                    .entry(part.to_string())
+                    .or_insert_with(RadixNode::new);
             }
         }
-        
+
         current_node.handlers.insert(method, handler);
     }
 
-    pub fn find<'a>(&'a self, method: &HttpMethod, path: &str) -> Option<(&'a HandlerFn, HashMap<String, String>)> {
+    pub fn find<'a>(
+        &'a self,
+        method: &HttpMethod,
+        path: &str,
+    ) -> Option<(&'a HandlerFn, HashMap<String, String>)> {
         let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
         let mut params = HashMap::new();
-        
+
         if let Some(node) = self.find_node(&self.root, &parts, 0, &mut params, method) {
             if let Some(handler) = node.handlers.get(method) {
                 return Some((handler, params));
@@ -84,12 +91,12 @@ impl RadixTree {
     }
 
     fn find_node<'a>(
-        &'a self, 
-        node: &'a RadixNode, 
-        parts: &[&str], 
-        index: usize, 
+        &'a self,
+        node: &'a RadixNode,
+        parts: &[&str],
+        index: usize,
         params: &mut HashMap<String, String>,
-        method: &HttpMethod
+        method: &HttpMethod,
     ) -> Option<&'a RadixNode> {
         if index == parts.len() {
             if node.handlers.contains_key(method) {
@@ -112,7 +119,9 @@ impl RadixTree {
             let is_valid = match param_child.param_type.as_deref() {
                 Some("num") => !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()),
                 Some("alpha") => !part.is_empty() && part.chars().all(|c| c.is_ascii_alphabetic()),
-                Some("alnum") => !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric()),
+                Some("alnum") => {
+                    !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric())
+                }
                 _ => true, // default accepts anything
             };
 
@@ -120,11 +129,11 @@ impl RadixTree {
                 if let Some(name) = &param_child.param_name {
                     params.insert(name.clone(), part.to_string());
                 }
-                
+
                 if let Some(found) = self.find_node(param_child, parts, index + 1, params, method) {
                     return Some(found);
                 }
-                
+
                 // Backtracking se falhou
                 if let Some(name) = &param_child.param_name {
                     params.remove(name);

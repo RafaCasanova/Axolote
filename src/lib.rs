@@ -257,8 +257,11 @@ impl Server {
             for (method, routes) in group.routes.drain() {
                 for mut route in routes {
                     let path = route.path.clone();
-                    let mut handler = std::mem::replace(&mut route.handler, Box::new(|_| HttpResponse::new(500, "Dummy", "Dummy")));
-                    
+                    let handler = std::mem::replace(
+                        &mut route.handler,
+                        Box::new(|_| HttpResponse::new(500, "Dummy", "Dummy")),
+                    );
+
                     if let Some(m) = mid.clone() {
                         let wrapped_handler: HandlerFn = Box::new(move |req| {
                             if let Some(resp) = m(&req) {
@@ -277,7 +280,10 @@ impl Server {
         for (method, routes) in self.routes.drain() {
             for mut route in routes {
                 let path = route.path.clone();
-                let handler = std::mem::replace(&mut route.handler, Box::new(|_| HttpResponse::new(500, "Dummy", "Dummy")));
+                let handler = std::mem::replace(
+                    &mut route.handler,
+                    Box::new(|_| HttpResponse::new(500, "Dummy", "Dummy")),
+                );
                 radix.insert(method.clone(), &path, handler);
             }
         }

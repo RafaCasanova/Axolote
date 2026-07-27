@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use super::http::{HttpMethod, HttpRequest, HttpResponse};
 
 /// Assinatura para as funções handler baseadas em Closures
@@ -22,6 +21,4 @@ impl Route {
             handler: Box::new(handler),
         }
     }
-
-
 }
