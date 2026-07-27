@@ -20,5 +20,7 @@ Thumbs.db
 
 # Bibliotecas compiladas
 *.rlib
+!libaxolote.rlib
 *.so
+!libaxolote_macros.so
 

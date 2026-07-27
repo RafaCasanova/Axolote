@@ -1,0 +1,36 @@
+name: PR Binary Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  check-binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for binary modifications
+        run: |
+          echo "Checking if any .so or .rlib files were modified in this PR..."
+          
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }} HEAD)
+          
+          FORBIDDEN=false
+          for file in $CHANGED_FILES; do
+            if [[ "$file" == *.so || "$file" == *.rlib ]]; then
+              echo "::error file=$file::Modification of pre-compiled binaries (*.so, *.rlib) is not allowed in Pull Requests. They are automatically built by the CI after merge."
+              FORBIDDEN=true
+            fi
+          done
+          
+          if [ "$FORBIDDEN" = true ]; then
+            echo "Failed: One or more pre-compiled binaries were modified."
+            exit 1
+          else
+            echo "Success: No binaries were modified."
+          fi

@@ -1,0 +1,46 @@
+name: Build and Commit Core Binaries
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compile libaxolote_macros.so
+        run: rustc -g --crate-type=proc-macro axolote_macros/src/lib.rs --crate-name axolote_macros -o libaxolote_macros.so
+
+      - name: Compile libaxolote.rlib
+        run: rustc -g --crate-type=lib src/lib.rs --crate-name axolote --extern axolote_macros=libaxolote_macros.so -o libaxolote.rlib
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          # We add the files to index to see if they differ from HEAD
+          git add libaxolote.rlib libaxolote_macros.so
+          if [[ -n "$(git status --porcelain libaxolote.rlib libaxolote_macros.so)" ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and Push changes
+        if: steps.check_changes.outputs.changed == 'true'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          git commit -m "chore: Auto-compile core binaries [skip ci]"
+          
+          git push
