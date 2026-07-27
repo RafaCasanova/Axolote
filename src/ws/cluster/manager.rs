@@ -21,27 +21,31 @@ pub struct ClusterManager;
 impl ClusterManager {
     /// Inicia o cluster manager em threads de background.
     /// Esta funcao retorna imediatamente; as threads rodam de forma autonoma.
-    pub fn start(config: ClusterConfig, cluster_state: ClusterState, hub: WsHub) {
+    pub fn start(config: ClusterConfig, cluster_state: ClusterState, hub: WsHub, reactor: Arc<crate::reactor::Reactor>, pool: Arc<crate::thread_pool::ThreadPool>) {
         let cfg = Arc::new(config);
 
         // Thread 1: Server Socket — escuta conexoes S2S de outros nos
         let listener_cfg = Arc::clone(&cfg);
         let listener_state = cluster_state.clone();
         let listener_hub = hub.clone();
+        let listener_reactor = Arc::clone(&reactor);
+        let listener_pool = Arc::clone(&pool);
         let _ = thread::Builder::new()
             .stack_size(64 * 1024)
             .spawn(move || {
-                Self::s2s_listener_loop(listener_cfg, listener_state, listener_hub);
+                Self::s2s_listener_loop(listener_cfg, listener_state, listener_hub, listener_reactor, listener_pool);
             });
 
         // Thread 2: Connector — conecta ativamente aos seed peers
         let connector_cfg = Arc::clone(&cfg);
         let connector_state = cluster_state.clone();
         let connector_hub = hub.clone();
+        let connector_reactor = Arc::clone(&reactor);
+        let connector_pool = Arc::clone(&pool);
         let _ = thread::Builder::new()
             .stack_size(64 * 1024)
             .spawn(move || {
-                Self::connector_loop(connector_cfg, connector_state, connector_hub);
+                Self::connector_loop(connector_cfg, connector_state, connector_hub, connector_reactor, connector_pool);
             });
 
         // Thread 3: Heartbeat + Dead peer detection
@@ -55,7 +59,7 @@ impl ClusterManager {
     }
 
     /// Loop que escuta conexoes TCP S2S de outros nos
-    fn s2s_listener_loop(cfg: Arc<ClusterConfig>, state: ClusterState, hub: WsHub) {
+    fn s2s_listener_loop(cfg: Arc<ClusterConfig>, state: ClusterState, hub: WsHub, reactor: Arc<crate::reactor::Reactor>, pool: Arc<crate::thread_pool::ThreadPool>) {
         let bind_addr = format!("0.0.0.0:{}", cfg.s2s_port);
         let listener = match TcpListener::bind(&bind_addr) {
             Ok(l) => l,
@@ -83,6 +87,8 @@ impl ClusterManager {
                                 remote_id,
                                 state.clone(),
                                 hub.clone(),
+                                reactor.clone(),
+                                pool.clone(),
                             );
                             state.register_peer(remote_id, sender);
                         }
@@ -94,7 +100,7 @@ impl ClusterManager {
     }
 
     /// Loop que tenta conectar ativamente aos seed peers
-    fn connector_loop(cfg: Arc<ClusterConfig>, state: ClusterState, hub: WsHub) {
+    fn connector_loop(cfg: Arc<ClusterConfig>, state: ClusterState, hub: WsHub, reactor: Arc<crate::reactor::Reactor>, pool: Arc<crate::thread_pool::ThreadPool>) {
         loop {
             for peer_addr in &cfg.peers {
                 // Verifica se ja estamos conectados a este peer
@@ -116,6 +122,8 @@ impl ClusterManager {
                                     remote_id,
                                     state.clone(),
                                     hub.clone(),
+                                    reactor.clone(),
+                                    pool.clone(),
                                 );
                                 state.register_peer(remote_id, sender);
                             }

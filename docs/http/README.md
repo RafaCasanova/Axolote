@@ -1,10 +1,10 @@
 # Documentação do Módulo HTTP
 
-O módulo HTTP do `axolote` provê roteamento e tratamento de requisições sem dependências externas. A estrutura baseia-se na thread pool do sistema operacional, processando conexões de forma concorrente.
+O módulo HTTP do `axolote` provê roteamento e tratamento de requisições sem dependências externas. A arquitetura baseia-se em um **Reactor Event-Loop** (`epoll` nativo no Linux) aliado a um **ThreadPool**. Isso permite um processamento de conexões não-bloqueante (asynchronous I/O) de altíssima performance, escalando para dezenas de milhares de conexões simultâneas (C10K problem).
 
-## 1. Instanciação e Concorrência
+## 1. Funcionamento do Servidor
 
-O núcleo da aplicação HTTP é a estrutura `Server`. Ao iniciar, ela reserva a porta especificada e, para cada conexão TCP estabelecida, delega a leitura e escrita do stream para uma nova thread independente. 
+O núcleo da aplicação HTTP é a estrutura `Server`. Ao iniciar, ela instancia um Reactor (`epoll`) em uma thread dedicada e cria um pool de threads (calculado com base nos núcleos lógicos disponíveis). Quando uma conexão TCP chega, ela é configurada como não-bloqueante (`O_NONBLOCK`) e registrada no Reactor. Toda leitura e escrita subsequentes disparam eventos que são delegados aos *Workers* da ThreadPool, liberando o Reactor para aceitar mais conexões sem travar. 
 
 ```rust
 extern crate axolote;

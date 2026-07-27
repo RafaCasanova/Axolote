@@ -79,13 +79,13 @@ use axolote::prelude::*;
 fn chat_handler(mut conn: WsConnection, hub: WsHub) {
     conn.join("lobby");
     
-    while let Some(msg) = conn.receive() {
+    conn.on_message(move |id, hub, msg| {
         if let WsMessage::Text(texto) = msg {
             // Este broadcast enviara a mensagem para todos os usuarios no "lobby",
             // independente do nó do cluster em que eles estejam conectados.
-            hub.broadcast_to_room("lobby", &format!("Node 1 [User {}]: {}", conn.id(), texto));
+            hub.broadcast_to_room("lobby", &format!("Node 1 [User {}]: {}", id, texto));
         }
-    }
+    });
 }
 
 fn main() {
@@ -119,11 +119,11 @@ use axolote::prelude::*;
 fn chat_handler(mut conn: WsConnection, hub: WsHub) {
     conn.join("lobby");
     
-    while let Some(msg) = conn.receive() {
+    conn.on_message(move |id, hub, msg| {
         if let WsMessage::Text(texto) = msg {
-            hub.broadcast_to_room("lobby", &format!("Node 2 [User {}]: {}", conn.id(), texto));
+            hub.broadcast_to_room("lobby", &format!("Node 2 [User {}]: {}", id, texto));
         }
-    }
+    });
 }
 
 fn main() {

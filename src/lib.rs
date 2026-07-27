@@ -1,11 +1,11 @@
 pub mod http;
+pub mod json;
 pub mod logger;
 pub mod reactor;
 pub mod route;
 pub mod route_group;
 pub mod thread_pool;
 pub mod ws;
-pub mod json;
 
 extern crate axolote_macros;
 
@@ -13,26 +13,26 @@ pub use axolote_macros::axolote_json;
 
 /// Módulo Prelude para facilitar a importação em projetos externos
 pub mod prelude {
-    pub use crate::Server;
     pub use crate::http::{HttpMethod, HttpRequest, HttpResponse};
-    pub use crate::route_group::RouteGroup;
-    pub use crate::logger::{Logger, LoggerConfig, LogFormat, LogTarget, LogLevel, LogDispatcher};
     pub use crate::json::ToJson;
-    pub use crate::ws::{WsConnection, WsMode, WsMessage, WsHandlerFn, WsHub, WsRouteConfig};
-    pub use crate::ws::cluster::ClusterConfig; // NEW
+    pub use crate::logger::{LogDispatcher, LogFormat, LogLevel, LogTarget, Logger, LoggerConfig};
+    pub use crate::route_group::RouteGroup;
+    pub use crate::ws::cluster::ClusterConfig;
+    pub use crate::ws::{WsConnection, WsHandlerFn, WsHub, WsMessage, WsMode, WsRouteConfig};
+    pub use crate::Server; // NEW
 }
 
+use crate::reactor::{Reactor, EPOLLIN, EPOLLONESHOT};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
 use std::os::unix::io::AsRawFd;
-use crate::reactor::{Reactor, EPOLLIN, EPOLLONESHOT};
+use std::sync::{Arc, Mutex};
 
 use self::http::{HttpMethod, HttpRequest, HttpResponse};
 use self::route::{HandlerFn, Route};
 use self::route_group::RouteGroup;
-use self::ws::{WsMode, WsHandlerFn, WsConnection, WsHub, WsRouteConfig};
-use self::ws::cluster::{ClusterConfig, ClusterState, ClusterManager};
+use self::ws::cluster::{ClusterConfig, ClusterManager, ClusterState};
+use self::ws::{WsConnection, WsHandlerFn, WsHub, WsMode, WsRouteConfig};
 
 /// Handler padrão caso nenhuma rota seja encontrada
 fn default_not_found_handler(_req: HttpRequest) -> HttpResponse {
@@ -45,6 +45,17 @@ struct WsRoute {
     mode: WsMode,
     config: WsRouteConfig,
     handler: WsHandlerFn,
+}
+
+struct HttpConnectionState {
+    stream: TcpStream,
+    raw_data: Vec<u8>,
+}
+
+enum HttpEventAction {
+    KeepAlive,
+    Close,
+    Upgraded,
 }
 
 /// Estrutura principal do Servidor HTTP
@@ -66,7 +77,7 @@ pub struct Server {
 
 impl Server {
     /// Cria um novo servidor HTTP.
-    /// `addr` pode ser apenas a porta (ex: "8080" -> bind em 127.0.0.1) 
+    /// `addr` pode ser apenas a porta (ex: "8080" -> bind em 127.0.0.1)
     /// ou o host completo (ex: "0.0.0.0:8080" -> bind em todas as interfaces).
     pub fn new(addr: &str) -> Self {
         let address = if addr.contains(':') {
@@ -86,13 +97,12 @@ impl Server {
             static_dirs: Vec::new(),
             not_found_handler: Box::new(default_not_found_handler),
             logger: crate::logger::Logger::new(crate::logger::LoggerConfig::new(vec![
-                    crate::logger::LogDispatcher {
-                        min_level: crate::logger::LogLevel::Info,
-                        format: crate::logger::LogFormat::Text,
-                        target: crate::logger::LogTarget::Console,
-                    }
-                ]
-            )),
+                crate::logger::LogDispatcher {
+                    min_level: crate::logger::LogLevel::Info,
+                    format: crate::logger::LogFormat::Text,
+                    target: crate::logger::LogTarget::Console,
+                },
+            ])),
             timeout: std::time::Duration::from_secs(10),
             reactor: Arc::new(Reactor::new().unwrap()),
             thread_pool: None,
@@ -118,13 +128,12 @@ impl Server {
             static_dirs: Vec::new(),
             not_found_handler: Box::new(default_not_found_handler),
             logger: crate::logger::Logger::new(crate::logger::LoggerConfig::new(vec![
-                    crate::logger::LogDispatcher {
-                        min_level: crate::logger::LogLevel::Info,
-                        format: crate::logger::LogFormat::Text,
-                        target: crate::logger::LogTarget::Console,
-                    }
-                ]
-            )),
+                crate::logger::LogDispatcher {
+                    min_level: crate::logger::LogLevel::Info,
+                    format: crate::logger::LogFormat::Text,
+                    target: crate::logger::LogTarget::Console,
+                },
+            ])),
             timeout: std::time::Duration::from_secs(10),
             reactor: Arc::new(Reactor::new().unwrap()),
             thread_pool: None,
@@ -153,7 +162,8 @@ impl Server {
     /// Mapeia todas as requisições iniciadas com `route_prefix` para arquivos reais no diretório físico `base_dir`.
     /// Protegido contra Path Traversal e resolve Mime Types automaticamente.
     pub fn serve_dir(&mut self, route_prefix: &str, base_dir: &str) {
-        self.static_dirs.push((route_prefix.to_string(), base_dir.to_string()));
+        self.static_dirs
+            .push((route_prefix.to_string(), base_dir.to_string()));
     }
 
     /// Define o timeout de leitura e escrita para as conexoes TCP em segundos (padrao: 10s)
@@ -179,6 +189,11 @@ impl Server {
         self.ws_hub.cleanup_empty_rooms();
     }
 
+    /// Retorna uma copia do WsHub. Util para testes ou acesso avancado.
+    pub fn get_ws_hub(&self) -> crate::ws::WsHub {
+        self.ws_hub.clone()
+    }
+
     /// Define um handler customizado para rotas 404 (Not Found)
     pub fn set_not_found_handler<F>(&mut self, handler: F)
     where
@@ -187,13 +202,15 @@ impl Server {
         self.not_found_handler = Box::new(handler);
     }
 
-
     /// Adiciona uma rota avulsa ao servidor (sem grupo/middleware)
     pub fn add_route<F>(&mut self, method: HttpMethod, path: &str, handler: F)
     where
         F: Fn(HttpRequest) -> HttpResponse + Send + Sync + 'static,
     {
-        self.routes.entry(method.clone()).or_insert_with(Vec::new).push(Route::new(method, path, handler));
+        self.routes
+            .entry(method.clone())
+            .or_insert_with(Vec::new)
+            .push(Route::new(method, path, handler));
     }
 
     /// Adiciona um grupo de rotas ao servidor
@@ -212,7 +229,13 @@ impl Server {
     }
 
     /// Adiciona uma rota WebSocket especificando configurações (max_size, ping)
-    pub fn add_ws_route_with_config(&mut self, path: &str, mode: WsMode, config: WsRouteConfig, handler: WsHandlerFn) {
+    pub fn add_ws_route_with_config(
+        &mut self,
+        path: &str,
+        mode: WsMode,
+        config: WsRouteConfig,
+        handler: WsHandlerFn,
+    ) {
         self.ws_routes.push(WsRoute {
             path: path.to_string(),
             mode,
@@ -222,180 +245,232 @@ impl Server {
     }
 
     /// Roda o servidor e começa a aceitar conexões (multi-threaded)
-    pub fn run(mut self) {
+    pub fn run(self) {
         let listener = match TcpListener::bind(&self.address) {
             Ok(l) => l,
             Err(e) => {
-                self.logger.error(&format!("Falha ao abrir porta {}: {}", self.address, e));
+                self.logger
+                    .error(&format!("Falha ao abrir porta {}: {}", self.address, e));
                 return;
             }
         };
 
-        // NEW: Inicia o cluster manager se estiver habilitado
-        if let Some(cfg) = self.cluster_config.clone() {
-            self.logger.info(&format!("Modo Cluster ativado: Node {} (S2S: {})", cfg.node_id, cfg.s2s_port));
-            let state = ClusterState::new(cfg.node_id, cfg.cluster_secret.clone());
-            self.ws_hub.enable_cluster(state.clone());
-            ClusterManager::start(cfg, state, self.ws_hub.clone());
-        } else {
-            self.logger.info("Modo Cluster desativado (Standalone)");
-        }
-
-        self.logger.info(&format!("Servidor rodando em http://{}", self.address));
-
         let mut self_mut = self;
         let num_threads = std::thread::available_parallelism()
             .map(|n| n.get())
-            .unwrap_or(4) * 4;
-            
-        self_mut.logger.info(&format!("Inicializando ThreadPool com {} threads.", num_threads));
+            .unwrap_or(4)
+            * 4;
+
+        self_mut.logger.info(&format!(
+            "Inicializando ThreadPool com {} threads.",
+            num_threads
+        ));
         let pool = Arc::new(crate::thread_pool::ThreadPool::new(num_threads));
         self_mut.thread_pool = Some(Arc::clone(&pool));
-        
+
+        let mut cluster_setup = None;
+        if let Some(cfg) = self_mut.cluster_config.clone() {
+            self_mut.logger.info(&format!(
+                "Modo Cluster ativado: Node {} (S2S: {})",
+                cfg.node_id, cfg.s2s_port
+            ));
+            let state = ClusterState::new(cfg.node_id, cfg.cluster_secret.clone());
+            self_mut.ws_hub.enable_cluster(state.clone());
+            cluster_setup = Some((cfg, state));
+        } else {
+            self_mut.logger.info("Modo Cluster desativado (Standalone)");
+        }
+
         let server_arc = Arc::new(self_mut);
 
         // Lança a thread do Reactor
         let reactor_clone = Arc::clone(&server_arc.reactor);
-        std::thread::Builder::new().name("epoll-reactor".to_string()).spawn(move || {
-            loop {
+        std::thread::Builder::new()
+            .name("epoll-reactor".to_string())
+            .spawn(move || loop {
                 let _ = reactor_clone.poll(100);
-            }
-        }).unwrap();
+            })
+            .unwrap();
+
+        // Inicia o cluster manager se estiver habilitado
+        if let Some((cfg, state)) = cluster_setup {
+            ClusterManager::start(
+                cfg,
+                state,
+                server_arc.ws_hub.clone(),
+                Arc::clone(&server_arc.reactor),
+                Arc::clone(&pool),
+            );
+        }
+
+        server_arc.logger.info(&format!(
+            "Servidor rodando em http://{}",
+            server_arc.address
+        ));
 
         for stream in listener.incoming() {
             match stream {
                 Ok(stream) => {
-                    let srv = Arc::clone(&server_arc);
-                    let mut fallback_stream = stream.try_clone().unwrap();
-                    if let Err(_) = pool.execute(move || {
-                        srv.handle_connection(stream);
-                    }) {
-                        use std::io::Write;
-                        let _ = fallback_stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n");
+                    if let Err(e) = stream.set_nonblocking(true) {
+                        server_arc
+                            .logger
+                            .error(&format!("Falha set_nonblocking: {}", e));
+                        continue;
                     }
+
+                    let stream_fd = stream.as_raw_fd();
+                    let state = Arc::new(Mutex::new(HttpConnectionState {
+                        stream,
+                        raw_data: Vec::new(),
+                    }));
+
+                    let reactor_clone = Arc::clone(&server_arc.reactor);
+                    let srv = Arc::clone(&server_arc);
+                    let pool_clone = Arc::clone(server_arc.thread_pool.as_ref().unwrap());
+
+                    let _ = server_arc.reactor.register(
+                        stream_fd,
+                        crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT,
+                        move |_| {
+                            let s = Arc::clone(&srv);
+                            let st = Arc::clone(&state);
+                            let r = Arc::clone(&reactor_clone);
+
+                            let _ = pool_clone.execute(move || {
+                                let action = s.process_http_event(&st);
+                                match action {
+                                    HttpEventAction::KeepAlive => {
+                                        let _ = r.modify(
+                                            stream_fd,
+                                            crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT,
+                                        );
+                                    }
+                                    HttpEventAction::Close => {
+                                        let _ = r.unregister(stream_fd);
+                                    }
+                                    HttpEventAction::Upgraded => {} // WS ja registrou no reactor
+                                }
+                            });
+                        },
+                    );
                 }
                 Err(e) => {
-                    server_arc.logger.error(&format!("Erro ao aceitar conexão: {}", e));
+                    server_arc
+                        .logger
+                        .error(&format!("Erro ao aceitar conexão: {}", e));
                 }
             }
         }
     }
 
-    fn handle_connection(&self, mut stream: TcpStream) {
-        // Prevenção contra Slowloris: Timeout configurável de leitura e escrita
-        let _ = stream.set_read_timeout(Some(self.timeout));
-        let _ = stream.set_write_timeout(Some(self.timeout));
-
-        let mut raw_data = Vec::new();
+    fn process_http_event(&self, state_mutex: &Mutex<HttpConnectionState>) -> HttpEventAction {
+        let mut state = state_mutex.lock().unwrap();
         let mut buffer = [0; 4096];
         const MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10 MB
         const MAX_HEADER_SIZE: usize = 64 * 1024; // 64 KB
 
-        'keep_alive: loop {
+        // 1. Lê tudo o que está disponível no socket de forma não-bloqueante
+        loop {
+            match state.stream.read(&mut buffer) {
+                Ok(0) => {
+                    // EOF limpo - conexão encerrada pelo peer
+                    return HttpEventAction::Close;
+                }
+                Ok(n) => {
+                    state.raw_data.extend_from_slice(&buffer[..n]);
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    break;
+                }
+                Err(e) => {
+                    self.logger
+                        .error(&format!("Erro ao ler stream (Reactor): {}", e));
+                    return HttpEventAction::Close;
+                }
+            }
+        }
+
+        // 2. Processa requisições pendentes no buffer
+        loop {
+            if state.raw_data.is_empty() {
+                return HttpEventAction::KeepAlive;
+            }
+
             let mut headers_ended = false;
             let mut content_length = 0;
             let mut headers_len = 0;
 
-            loop {
-                // Primeiro verifica se o `raw_data` atual já tem um header
-                if !headers_ended {
-                    let mut end_idx = None;
-                    for i in 0..raw_data.len().saturating_sub(3) {
-                        if &raw_data[i..i+4] == b"\r\n\r\n" {
-                            end_idx = Some(i + 4);
-                            break;
-                        }
-                    }
-                    if end_idx.is_none() {
-                        for i in 0..raw_data.len().saturating_sub(1) {
-                            if &raw_data[i..i+2] == b"\n\n" {
-                                end_idx = Some(i + 2);
-                                break;
-                            }
-                        }
-                    }
-
-                    if let Some(idx) = end_idx {
-                        headers_ended = true;
-                        headers_len = idx;
-                        
-                        let header_str = String::from_utf8_lossy(&raw_data[..idx]);
-                        for line in header_str.lines() {
-                            let line_lower = line.to_lowercase();
-                            if line_lower.starts_with("content-length:") {
-                                if let Some(parts) = line_lower.split_once(':') {
-                                    if let Ok(cl) = parts.1.trim().parse::<usize>() {
-                                        content_length = cl;
-                                    }
-                                }
-                            }
-                        }
-                        if content_length > MAX_BODY_SIZE {
-                            self.logger.error("Content-Length excede limite de 10MB");
-                            let response = HttpResponse::bad_request("413 - Payload Too Large");
-                            let _ = stream.write_all(&response.to_bytes());
-                            return;
-                        }
-                    } else if raw_data.len() > MAX_HEADER_SIZE {
-                        self.logger.error("Cabeçalhos excedem limite de 64KB");
-                        let _ = stream.write_all(b"HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\n\r\n");
-                        return;
-                    }
+            let mut end_idx = None;
+            for i in 0..state.raw_data.len().saturating_sub(3) {
+                if &state.raw_data[i..i + 4] == b"\r\n\r\n" {
+                    end_idx = Some(i + 4);
+                    break;
                 }
-
-                if headers_ended {
-                    let body_read = raw_data.len() - headers_len;
-                    if body_read >= content_length {
-                        break; // Terminou de ler toda a request
-                    }
-                }
-
-                // Lê mais bytes da rede se a request ainda não está completa
-                match stream.read(&mut buffer) {
-                    Ok(0) => {
-                        if raw_data.is_empty() {
-                            return; // EOF Limpo
-                        }
+            }
+            if end_idx.is_none() {
+                for i in 0..state.raw_data.len().saturating_sub(1) {
+                    if &state.raw_data[i..i + 2] == b"\n\n" {
+                        end_idx = Some(i + 2);
                         break;
-                    },
-                    Ok(n) => {
-                        raw_data.extend_from_slice(&buffer[..n]);
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {
-                        break;
-                    }
-                    Err(e) => {
-                        self.logger.error(&format!("Erro ao ler stream: {}", e));
-                        return;
                     }
                 }
             }
 
-            if raw_data.is_empty() {
-                // Nada foi lido
-                break 'keep_alive;
+            if let Some(idx) = end_idx {
+                headers_ended = true;
+                headers_len = idx;
+
+                let header_str = String::from_utf8_lossy(&state.raw_data[..idx]);
+                for line in header_str.lines() {
+                    let line_lower = line.to_lowercase();
+                    if line_lower.starts_with("content-length:") {
+                        if let Some(parts) = line_lower.split_once(':') {
+                            if let Ok(cl) = parts.1.trim().parse::<usize>() {
+                                content_length = cl;
+                            }
+                        }
+                    }
+                }
+                if content_length > MAX_BODY_SIZE {
+                    self.logger.error("Content-Length excede limite de 10MB");
+                    let response = HttpResponse::bad_request("413 - Payload Too Large");
+                    let _ = state.stream.write_all(&response.to_bytes());
+                    return HttpEventAction::Close;
+                }
+            } else if state.raw_data.len() > MAX_HEADER_SIZE {
+                self.logger.error("Cabeçalhos excedem limite de 64KB");
+                let _ = state.stream.write_all(
+                    b"HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\n\r\n",
+                );
+                return HttpEventAction::Close;
+            }
+
+            if !headers_ended {
+                return HttpEventAction::KeepAlive;
             }
 
             let request_len = headers_len + content_length;
-            let current_request_data = if raw_data.len() >= request_len {
-                &raw_data[..request_len]
-            } else {
-                &raw_data[..]
-            };
+            if state.raw_data.len() < request_len {
+                return HttpEventAction::KeepAlive;
+            }
 
+            let current_request_data = &state.raw_data[..request_len];
             let mut should_close = false;
 
             if let Some(mut req) = HttpRequest::from_bytes(current_request_data) {
-                // Checa se o client quer Connection: close
-                let client_wants_close = req.headers.get("connection").map(|v| v.to_lowercase()) == Some("close".to_string());
-                
-                // Verifica se é um pedido de Upgrade para WebSocket
+                let client_wants_close = req.headers.get("connection").map(|v| v.to_lowercase())
+                    == Some("close".to_string());
+
                 if ws::handshake::is_websocket_upgrade(&req.headers) {
-                    self.handle_websocket(stream, &req);
-                    return;
+                    if let Ok(stream_clone) = state.stream.try_clone() {
+                        self.handle_websocket(stream_clone, &req);
+                    }
+                    return HttpEventAction::Upgraded;
                 }
 
-                // Tratamento CORS nativo (Preflight)
                 if req.method == HttpMethod::OPTIONS && self.cors_config.is_some() {
                     if req.headers.contains_key("access-control-request-method") {
                         let response = self.cors_config.as_ref().unwrap().handle_preflight(&req);
@@ -403,26 +478,23 @@ impl Server {
                             "OPTIONS {} - {} {} (CORS Preflight)",
                             req.path, response.status_code, response.status_text
                         ));
-                        let _ = stream.write_all(&response.to_bytes());
-                        let _ = stream.flush();
+                        let _ = state.stream.write_all(&response.to_bytes());
+                        let _ = state.stream.flush();
+
                         if client_wants_close {
-                            break 'keep_alive;
+                            return HttpEventAction::Close;
                         }
-                        if raw_data.len() >= request_len {
-                            raw_data = raw_data[request_len..].to_vec();
-                        }
-                        continue 'keep_alive;
+                        state.raw_data = state.raw_data[request_len..].to_vec();
+                        continue;
                     }
                 }
 
                 let mut response = self.resolve_request(&mut req);
 
-                // Injeta cabeçalhos CORS na resposta se ativado
                 if let Some(cors) = &self.cors_config {
                     response = cors.apply_to_response(&req, response);
                 }
 
-                // Determina fechamento de conexão
                 if client_wants_close {
                     response = response.with_header("Connection", "close");
                     should_close = true;
@@ -434,21 +506,19 @@ impl Server {
                     "{:?} {} - {} {}",
                     req.method, req.path, response.status_code, response.status_text
                 ));
-                let _ = stream.write_all(&response.to_bytes());
+                let _ = state.stream.write_all(&response.to_bytes());
             } else {
-                let response = HttpResponse::bad_request("400 - Requisicao invalida").with_header("Connection", "close");
-                self.logger.warn("Requisição inválida recebida");
-                let _ = stream.write_all(&response.to_bytes());
-                should_close = true;
+                let response = HttpResponse::bad_request("400 - Requisicao invalida")
+                    .with_header("Connection", "close");
+                let _ = state.stream.write_all(&response.to_bytes());
+                return HttpEventAction::Close;
             }
-            
-            let _ = stream.flush();
 
-            if should_close || raw_data.len() < request_len {
-                break 'keep_alive;
+            state.raw_data = state.raw_data[request_len..].to_vec();
+
+            if should_close {
+                return HttpEventAction::Close;
             }
-            
-            raw_data = raw_data[request_len..].to_vec();
         }
     }
 
@@ -459,7 +529,8 @@ impl Server {
         let ws_route = match ws_route {
             Some(r) => r,
             None => {
-                self.logger.warn(&format!("WS: Rota não encontrada para {}", req.path));
+                self.logger
+                    .warn(&format!("WS: Rota não encontrada para {}", req.path));
                 let response = HttpResponse::not_found("404 - Rota WebSocket nao encontrada");
                 let _ = stream.write_all(&response.to_bytes());
                 return;
@@ -482,34 +553,56 @@ impl Server {
             if guard.strict_rfc {
                 if req.method != crate::http::HttpMethod::GET {
                     self.logger.warn("WS Security: Método não é GET");
-                    let _ = stream.write_all(&HttpResponse::bad_request("400 - Method Must Be GET").to_bytes());
+                    let _ = stream.write_all(
+                        &HttpResponse::bad_request("400 - Method Must Be GET").to_bytes(),
+                    );
                     return;
                 }
-                let version = req.headers.get("sec-websocket-version").or_else(|| req.headers.get("Sec-WebSocket-Version")).map(|s| s.as_str());
+                let version = req
+                    .headers
+                    .get("sec-websocket-version")
+                    .or_else(|| req.headers.get("Sec-WebSocket-Version"))
+                    .map(|s| s.as_str());
                 if version != Some("13") {
-                    self.logger.warn("WS Security: sec-websocket-version inválido");
-                    let _ = stream.write_all(&HttpResponse::new(400, "Bad Request", "400 - Unsupported Version").to_bytes());
+                    self.logger
+                        .warn("WS Security: sec-websocket-version inválido");
+                    let _ = stream.write_all(
+                        &HttpResponse::new(400, "Bad Request", "400 - Unsupported Version")
+                            .to_bytes(),
+                    );
                     return;
                 }
             }
 
             if let Some(allowed_origins) = &guard.allowed_origins {
-                let origin = req.headers.get("origin").or_else(|| req.headers.get("Origin"));
+                let origin = req
+                    .headers
+                    .get("origin")
+                    .or_else(|| req.headers.get("Origin"));
                 if let Some(o) = origin {
                     if !allowed_origins.contains(o) {
-                        self.logger.warn(&format!("WS Security: Origem bloqueada: {}", o));
-                        let _ = stream.write_all(&HttpResponse::new(403, "Forbidden", "403 - Forbidden Origin").to_bytes());
+                        self.logger
+                            .warn(&format!("WS Security: Origem bloqueada: {}", o));
+                        let _ = stream.write_all(
+                            &HttpResponse::new(403, "Forbidden", "403 - Forbidden Origin")
+                                .to_bytes(),
+                        );
                         return;
                     }
                 } else {
                     self.logger.warn("WS Security: Origem ausente");
-                    let _ = stream.write_all(&HttpResponse::new(403, "Forbidden", "403 - Missing Origin").to_bytes());
+                    let _ = stream.write_all(
+                        &HttpResponse::new(403, "Forbidden", "403 - Missing Origin").to_bytes(),
+                    );
                     return;
                 }
             }
 
             if let Some(allowed_protos) = &guard.allowed_subprotocols {
-                let client_protos = req.headers.get("sec-websocket-protocol").or_else(|| req.headers.get("Sec-WebSocket-Protocol"));
+                let client_protos = req
+                    .headers
+                    .get("sec-websocket-protocol")
+                    .or_else(|| req.headers.get("Sec-WebSocket-Protocol"));
                 if let Some(cp) = client_protos {
                     let mut matched = false;
                     for p in cp.split(',') {
@@ -522,7 +615,9 @@ impl Server {
                     }
                     if !matched {
                         self.logger.warn("WS Security: Subprotocolo recusado");
-                        let _ = stream.write_all(&HttpResponse::bad_request("400 - Unsupported Subprotocol").to_bytes());
+                        let _ = stream.write_all(
+                            &HttpResponse::bad_request("400 - Unsupported Subprotocol").to_bytes(),
+                        );
                         return;
                     }
                 }
@@ -530,8 +625,11 @@ impl Server {
 
             if let Some(validator) = &guard.custom_validator {
                 if !validator(req) {
-                    self.logger.warn("WS Security: Custom Validator recusou a conexão");
-                    let _ = stream.write_all(&HttpResponse::new(403, "Forbidden", "403 - Forbidden").to_bytes());
+                    self.logger
+                        .warn("WS Security: Custom Validator recusou a conexão");
+                    let _ = stream.write_all(
+                        &HttpResponse::new(403, "Forbidden", "403 - Forbidden").to_bytes(),
+                    );
                     return;
                 }
             }
@@ -540,27 +638,43 @@ impl Server {
             for (param, expected) in &guard.required_query_tokens {
                 let actual = req.query_params.get(param).map(|s| s.as_str());
                 if !actual.map_or(false, |a| crate::ws::crypto::constant_time_eq(a, expected)) {
-                    self.logger.warn(&format!("WS Security: Falha na validação do Query Token '{}'", param));
-                    let _ = stream.write_all(&HttpResponse::new(401, "Unauthorized", "401 - Unauthorized").to_bytes());
+                    self.logger.warn(&format!(
+                        "WS Security: Falha na validação do Query Token '{}'",
+                        param
+                    ));
+                    let _ = stream.write_all(
+                        &HttpResponse::new(401, "Unauthorized", "401 - Unauthorized").to_bytes(),
+                    );
                     return;
                 }
             }
 
             // Verifica Token no Header
             for (header_name, expected) in &guard.required_header_tokens {
-                let actual = req.headers.get(header_name)
+                let actual = req
+                    .headers
+                    .get(header_name)
                     .or_else(|| req.headers.get(&header_name.to_lowercase()))
                     .map(|s| s.as_str());
                 if !actual.map_or(false, |a| crate::ws::crypto::constant_time_eq(a, expected)) {
-                    self.logger.warn(&format!("WS Security: Falha na validação do Header Token '{}'", header_name));
-                    let _ = stream.write_all(&HttpResponse::new(401, "Unauthorized", "401 - Unauthorized").to_bytes());
+                    self.logger.warn(&format!(
+                        "WS Security: Falha na validação do Header Token '{}'",
+                        header_name
+                    ));
+                    let _ = stream.write_all(
+                        &HttpResponse::new(401, "Unauthorized", "401 - Unauthorized").to_bytes(),
+                    );
                     return;
                 }
             }
         }
 
         let accept_key = ws::handshake::compute_accept_key(&ws_key);
-        if !ws::handshake::send_upgrade_response(&mut stream, &accept_key, negotiated_protocol.as_deref()) {
+        if !ws::handshake::send_upgrade_response(
+            &mut stream,
+            &accept_key,
+            negotiated_protocol.as_deref(),
+        ) {
             self.logger.error("WS: Falha ao enviar resposta de Upgrade");
             return;
         }
@@ -568,55 +682,69 @@ impl Server {
         let mode = ws_route.mode;
         let config = ws_route.config.clone();
         let handler = ws_route.handler;
-        
+
         let mut id = ws::hub::next_connection_id();
-        
+
         if let Some(extractor) = &config.id_extractor {
             if let Some(extracted_id) = extractor(req) {
                 if self.ws_hub.is_connected(extracted_id) {
-                    self.logger.warn(&format!("WS: Conexão abortada. ID {} já está em uso.", extracted_id));
-                    let _ = stream.write_all(&HttpResponse::new(409, "Conflict", "409 - ID already in use").to_bytes());
+                    self.logger.warn(&format!(
+                        "WS: Conexão abortada. ID {} já está em uso.",
+                        extracted_id
+                    ));
+                    let _ = stream.write_all(
+                        &HttpResponse::new(409, "Conflict", "409 - ID already in use").to_bytes(),
+                    );
                     return;
                 }
                 id = extracted_id;
             }
         }
 
-        self.logger.info(&format!("WS: Conexão [ID: {}] estabelecida em {} (modo: {:?})", id, req.path, mode));
+        self.logger.info(&format!(
+            "WS: Conexão [ID: {}] estabelecida em {} (modo: {:?})",
+            id, req.path, mode
+        ));
 
         match WsConnection::new(stream, mode, self.ws_hub.clone(), id, config) {
             Some(mut conn) => {
                 handler(&mut conn, self.ws_hub.clone());
 
                 let stream_fd = conn.stream.as_raw_fd();
-                let _ = conn.stream.set_read_timeout(Some(std::time::Duration::from_millis(500)));
+                let _ = conn
+                    .stream
+                    .set_read_timeout(Some(std::time::Duration::from_millis(500)));
 
                 let conn_arc = Arc::new(Mutex::new(conn));
-                
+
                 let conn_clone = Arc::clone(&conn_arc);
                 let pool_clone = self.thread_pool.as_ref().unwrap().clone();
                 let reactor_clone = Arc::clone(&self.reactor);
-                
-                let _ = self.reactor.register(stream_fd, EPOLLIN | EPOLLONESHOT, move |_| {
-                    let c = Arc::clone(&conn_clone);
-                    let r = Arc::clone(&reactor_clone);
-                    
-                    let _ = pool_clone.execute(move || {
-                        let keep_alive = {
-                            let mut c_guard = c.lock().unwrap();
-                            c_guard.process_next_frame()
-                        };
-                        
-                        if keep_alive {
-                            let _ = r.modify(stream_fd, EPOLLIN | EPOLLONESHOT);
-                        } else {
-                            let _ = r.unregister(stream_fd);
-                        }
+
+                let _ = self
+                    .reactor
+                    .register(stream_fd, EPOLLIN | EPOLLONESHOT, move |_| {
+                        let c = Arc::clone(&conn_clone);
+                        let r = Arc::clone(&reactor_clone);
+
+                        let _ = pool_clone.execute(move || {
+                            let keep_alive = {
+                                let mut c_guard = c.lock().unwrap();
+                                c_guard.process_next_frame()
+                            };
+
+                            if keep_alive {
+                                let _ = r.modify(stream_fd, EPOLLIN | EPOLLONESHOT);
+                            } else {
+                                let _ = r.unregister(stream_fd);
+                            }
+                        });
                     });
-                });
-            },
+            }
             None => {
-                self.logger.warn("WS: Conexão abortada (falha ao criar a sessão, provável esgotamento de FD)");
+                self.logger.warn(
+                    "WS: Conexão abortada (falha ao criar a sessão, provável esgotamento de FD)",
+                );
             }
         }
     }
@@ -656,7 +784,7 @@ impl Server {
                     if sub_path.contains("../") || sub_path.contains("..\\") {
                         return HttpResponse::not_found("404 - Not Found");
                     }
-                    
+
                     let mut file_path = std::path::PathBuf::from(dir);
                     file_path.push(sub_path);
 
@@ -676,10 +804,11 @@ impl Server {
             Ok(bytes) => {
                 let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
                 let mime = crate::http::static_serve::get_mime_type(ext);
-                
+
                 let mut res = HttpResponse::new(200, "OK", "");
                 res.body = bytes;
-                res.headers.push(("Content-Type".to_string(), mime.to_string()));
+                res.headers
+                    .push(("Content-Type".to_string(), mime.to_string()));
                 res
             }
             Err(_) => HttpResponse::not_found("404 - File Not Found"),

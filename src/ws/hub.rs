@@ -596,20 +596,22 @@ impl WsHub {
     /// Limpa entradas orfas de `local_rooms` e `room_leaders` do cluster.
     /// Pode ser chamado manualmente a qualquer momento ou automaticamente pelo timer.
     pub fn cleanup_empty_rooms(&self) {
-        // Fase 1: coletar todas as salas que possuem pelo menos 1 cliente local
-        let mut active_rooms: HashSet<String> = HashSet::new();
-        for shard_mutex in self.shards.iter() {
-            let shard = shard_mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            for client in shard.clients.values() {
-                for room in &client.rooms {
-                    active_rooms.insert(room.clone());
+        if let Some(state) = &self.cluster_state {
+            // Lock no cluster state primeiro para evitar race condition com join_room
+            let mut inner = state.inner.lock().unwrap_or_else(|p| p.into_inner());
+
+            // Fase 1: coletar todas as salas que possuem pelo menos 1 cliente local
+            let mut active_rooms: HashSet<String> = HashSet::new();
+            for shard_mutex in self.shards.iter() {
+                let shard = shard_mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                for client in shard.clients.values() {
+                    for room in &client.rooms {
+                        active_rooms.insert(room.clone());
+                    }
                 }
             }
-        }
 
-        // Fase 2: limpar do cluster as salas que nao estao mais ativas
-        if let Some(state) = &self.cluster_state {
-            let mut inner = state.inner.lock().unwrap_or_else(|p| p.into_inner());
+            // Fase 2: limpar do cluster as salas que nao estao mais ativas
             
             // Remover de local_rooms as salas sem clientes
             inner.local_rooms.retain(|room| active_rooms.contains(room));
@@ -622,6 +624,16 @@ impl WsHub {
                     true // Manter lideranca de outros nos (eles cuidam dos proprios)
                 }
             });
+        }
+    }
+
+    /// Verifica se uma sala esta registrada ativamente no cluster (uso principal em testes)
+    pub fn has_local_room(&self, room: &str) -> bool {
+        if let Some(state) = &self.cluster_state {
+            let inner = state.inner.lock().unwrap_or_else(|p| p.into_inner());
+            inner.local_rooms.contains(room)
+        } else {
+            false
         }
     }
 }

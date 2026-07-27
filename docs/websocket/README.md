@@ -29,29 +29,30 @@ fn main() {
 }
 ```
 
-O ciclo de vida do manipulador baseia-se na extração serializada de pacotes de mensagem através da instrução iterativa `conn.receive()`. A leitura bloqueia a thread passivamente sem consumo residual de CPU até a chegada do próximo *frame*.
+O ciclo de vida do manipulador baseia-se na configuração de callbacks de mensagem e fechamento através das instruções `conn.on_message()` e `conn.on_close()`. O processamento real das mensagens ocorre de forma assíncrona no motor (Reactor).
 
 ```rust
 fn chat_handler(mut conn: WsConnection, hub: WsHub) {
     // 1. Fase de Conexão e Inicialização
-    let id_conexao = conn.id();
     conn.join("lobby");
     
-    // 2. Loop de Recepção de Dados
-    while let Some(msg) = conn.receive() {
+    // 2. Recepção de Dados (Callback Assíncrono)
+    conn.on_message(move |id, hub, msg| {
         match msg {
             WsMessage::Text(texto) => {
-                hub.broadcast_to_room("lobby", &format!("User {} disse: {}", id_conexao, texto));
+                hub.broadcast_to_room("lobby", &format!("User {} disse: {}", id, texto));
             }
             WsMessage::Binary(dados) => {
                 // Manipulação de pacotes binários customizados
             }
             _ => {} // Ignora Ping, Pong e Close
         }
-    }
+    });
     
-    // 3. Fase de Desconexão (Cleanup)
-    // conn.receive() retornará None caso o túnel TCP encerre (Graceful close, Timeout ou Drop)
+    // 3. Fase de Desconexão (Cleanup Callback)
+    conn.on_close(move |id, hub, _code| {
+        hub.broadcast_to_room("lobby", &format!("User {} saiu da sala.", id));
+    });
 }
 ```
 
@@ -107,15 +108,15 @@ server.ws_cleanup_rooms();
 A limpeza também pode ser invocada diretamente pelo `WsHub` dentro de um handler WebSocket:
 
 ```rust
-fn admin_handler(conn: &mut WsConnection, hub: WsHub) {
-    while let Some(msg) = conn.receive() {
+fn admin_handler(mut conn: WsConnection, hub: WsHub) {
+    conn.on_message(move |id, hub, msg| {
         if let WsMessage::Text(cmd) = msg {
             if cmd == "/cleanup" {
                 hub.cleanup_empty_rooms();
-                conn.send("Salas vazias removidas da memoria.");
+                hub.send_to(id, "Salas vazias removidas da memoria.");
             }
         }
-    }
+    });
 }
 ```
 

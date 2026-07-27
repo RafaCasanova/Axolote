@@ -1,7 +1,7 @@
 # Segurança e Handshake no WebSocket (`WsSecurityGuard`)
 
 O módulo `WsSecurityGuard` é um interceptador nativo projetado para avaliar e validar requisições antes de realizar o "Upgrade" de HTTP para WebSocket.
-Ele permite barrar conexões maliciosas, não autorizadas ou incompatíveis logo na entrada, sem alocar as threads de *Workers* ou instanciar estruturas `WsConnection`.
+Ele permite barrar conexões maliciosas, não autorizadas ou incompatíveis logo na entrada, antes mesmo que a conexão seja promovida e alocada no `Reactor` de WebSockets, economizando recursos preciosos.
 
 ## Principais Mecanismos de Proteção
 
@@ -35,10 +35,11 @@ use std::sync::Arc;
 use axolote::ws::security::WsSecurityGuard;
 
 fn chat_seguro_handler(mut conn: WsConnection, _hub: WsHub) {
+    conn.on_message(move |_id, _hub, _msg| {
+        // processa mensagem
+    });
+    // conn.send pode ser chamado fora se WsMode for Both e não quisermos esperar callback
     conn.send("Autenticação validada pelo Handshake!");
-    while let Some(_) = conn.receive() {
-        // ...
-    }
 }
 
 fn main() {
