@@ -10,9 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        run: |
+          git init .
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }} ${{ github.head_ref }}:refs/remotes/origin/${{ github.head_ref }}
+          git checkout origin/${{ github.head_ref }}
 
       - name: Check for binary modifications
         run: |

@@ -13,7 +13,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        run: |
+          git init .
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git fetch --depth=1 origin ${{ github.ref_name }}
+          git checkout -B ${{ github.ref_name }} FETCH_HEAD
 
       - name: Compile libaxolote_macros.so
         run: rustc -g --crate-type=proc-macro axolote_macros/src/lib.rs --crate-name axolote_macros -o libaxolote_macros.so
