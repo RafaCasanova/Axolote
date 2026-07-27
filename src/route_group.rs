@@ -1,11 +1,13 @@
 use super::http::{HttpMethod, HttpRequest, HttpResponse};
 use super::route::Route;
 
+use std::sync::Arc;
+
 /// Assinatura do middleware.
 /// Recebe a requisição por referência e retorna:
 ///   - None       → requisição liberada, continua para o handler
 ///   - Some(resp) → requisição bloqueada, retorna essa resposta imediatamente
-pub type MiddlewareFn = Box<dyn Fn(&HttpRequest) -> Option<HttpResponse> + Send + Sync>;
+pub type MiddlewareFn = Arc<dyn Fn(&HttpRequest) -> Option<HttpResponse> + Send + Sync>;
 
 /// Grupo de rotas com um prefixo comum e um middleware opcional.
 /// Exemplo: grupo "/cliente" com middleware de autenticação
@@ -32,7 +34,7 @@ impl RouteGroup {
     where
         F: Fn(&HttpRequest) -> Option<HttpResponse> + Send + Sync + 'static,
     {
-        self.middleware = Some(Box::new(middleware));
+        self.middleware = Some(Arc::new(middleware));
     }
 
     /// Adiciona uma rota ao grupo. O path informado é relativo ao prefixo do grupo.

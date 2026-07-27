@@ -62,8 +62,16 @@ Se você for hospedar o Frontend (React, Vue, etc) no mesmo servidor ou quiser e
 server.serve_dir("/public", "./meus_arquivos");
 ```
 
-### Roteamento com Parâmetros Dinâmicos de Caminho (Path Parameters)
-Variáveis no caminho da URL são declaradas entre chaves `{}`. O engine de roteamento realiza o *pattern matching* e injeta o valor analisado no mapa `req.params`.
+### Roteamento com Parâmetros Dinâmicos de Caminho e Tipagem (Radix Tree)
+Variáveis no caminho da URL são declaradas entre chaves `{}`. O engine de roteamento agora utiliza uma estrutura de **Radix Tree (Trie)** de alta performance, permitindo resolver caminhos em tempo $O(K)$ independente do número de rotas cadastradas. 
+
+O sistema suporta sufixos de tipagem para restringir valores e resolver conflitos de mesma estrutura (Backtracking):
+- `{variavel:num}`: Aceita apenas números (ex: `123`).
+- `{variavel:alpha}`: Aceita apenas letras (ex: `bob`).
+- `{variavel:alnum}`: Aceita letras e números (Alfanumérico).
+- `{variavel}`: Aceita qualquer segmento (Fallback universal).
+
+O *pattern matching* injeta o valor validado no mapa `req.params`.
 
 ```rust
 fn user_profile(mut req: HttpRequest) -> HttpResponse {
@@ -75,7 +83,8 @@ fn user_profile(mut req: HttpRequest) -> HttpResponse {
 }
 
 // Rota registrada: /user/1234
-server.add_route(HttpMethod::GET, "/user/{id}", user_profile);
+server.add_route(HttpMethod::GET, "/user/{id:num}", user_profile);
+// Pode co-existir perfeitamente com /user/{name:alpha} sem colisões!
 ```
 
 ### Parâmetros de Consulta (Query Parameters)

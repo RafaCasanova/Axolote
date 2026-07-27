@@ -1,6 +1,7 @@
 pub mod http;
 pub mod json;
 pub mod logger;
+pub mod radix;
 pub mod reactor;
 pub mod route;
 pub mod route_group;
@@ -73,6 +74,7 @@ pub struct Server {
     pub timeout: std::time::Duration,
     reactor: Arc<Reactor>,
     thread_pool: Option<Arc<crate::thread_pool::ThreadPool>>,
+    radix_tree: Arc<crate::radix::RadixTree>,
 }
 
 impl Server {
@@ -106,6 +108,7 @@ impl Server {
             timeout: std::time::Duration::from_secs(10),
             reactor: Arc::new(Reactor::new().unwrap()),
             thread_pool: None,
+            radix_tree: Arc::new(crate::radix::RadixTree::new()),
         }
     }
 
@@ -137,6 +140,7 @@ impl Server {
             timeout: std::time::Duration::from_secs(10),
             reactor: Arc::new(Reactor::new().unwrap()),
             thread_pool: None,
+            radix_tree: Arc::new(crate::radix::RadixTree::new()),
         }
     }
 
@@ -245,7 +249,41 @@ impl Server {
     }
 
     /// Roda o servidor e começa a aceitar conexões (multi-threaded)
-    pub fn run(self) {
+    pub fn run(mut self) {
+        let mut radix = crate::radix::RadixTree::new();
+
+        for mut group in self.groups.drain(..) {
+            let mid = group.middleware.clone();
+            for (method, routes) in group.routes.drain() {
+                for mut route in routes {
+                    let path = route.path.clone();
+                    let mut handler = std::mem::replace(&mut route.handler, Box::new(|_| HttpResponse::new(500, "Dummy", "Dummy")));
+                    
+                    if let Some(m) = mid.clone() {
+                        let wrapped_handler: HandlerFn = Box::new(move |req| {
+                            if let Some(resp) = m(&req) {
+                                return resp;
+                            }
+                            handler(req)
+                        });
+                        radix.insert(method.clone(), &path, wrapped_handler);
+                    } else {
+                        radix.insert(method.clone(), &path, handler);
+                    }
+                }
+            }
+        }
+
+        for (method, routes) in self.routes.drain() {
+            for mut route in routes {
+                let path = route.path.clone();
+                let handler = std::mem::replace(&mut route.handler, Box::new(|_| HttpResponse::new(500, "Dummy", "Dummy")));
+                radix.insert(method.clone(), &path, handler);
+            }
+        }
+
+        self.radix_tree = Arc::new(radix);
+
         let listener = match TcpListener::bind(&self.address) {
             Ok(l) => l,
             Err(e) => {
@@ -749,31 +787,11 @@ impl Server {
         }
     }
 
-    /// Resolve a requisição: tenta grupos (com middleware) primeiro, depois rotas avulsas
+    /// Resolve a requisição utilizando a Radix Tree O(K)
     fn resolve_request(&self, req: &mut HttpRequest) -> HttpResponse {
-        for group in &self.groups {
-            if let Some(routes_for_method) = group.routes.get(&req.method) {
-                for route in routes_for_method {
-                    if let Some(params) = route.matches(&req.method, &req.path) {
-                        req.params = params;
-                        if let Some(ref middleware) = group.middleware {
-                            if let Some(blocked_response) = middleware(req) {
-                                return blocked_response;
-                            }
-                        }
-                        return (route.handler)(req.take());
-                    }
-                }
-            }
-        }
-
-        if let Some(routes_for_method) = self.routes.get(&req.method) {
-            for route in routes_for_method {
-                if let Some(params) = route.matches(&req.method, &req.path) {
-                    req.params = params;
-                    return (route.handler)(req.take());
-                }
-            }
+        if let Some((handler, params)) = self.radix_tree.find(&req.method, &req.path) {
+            req.params = params;
+            return handler(req.take());
         }
 
         if req.method == HttpMethod::GET {
