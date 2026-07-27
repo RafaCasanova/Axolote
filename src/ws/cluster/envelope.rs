@@ -28,6 +28,8 @@ pub enum S2sMessageType {
     BroadcastExcept = 5,
     /// Broadcast para sala excluindo um ID
     BroadcastRoomExcept = 6,
+    /// Sinal de desligamento (Graceful Shutdown)
+    Leave = 7,
 }
 
 impl S2sMessageType {
@@ -40,6 +42,7 @@ impl S2sMessageType {
             4 => Some(S2sMessageType::Heartbeat),
             5 => Some(S2sMessageType::BroadcastExcept),
             6 => Some(S2sMessageType::BroadcastRoomExcept),
+            7 => Some(S2sMessageType::Leave),
             _ => None,
         }
     }

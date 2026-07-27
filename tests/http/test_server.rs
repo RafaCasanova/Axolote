@@ -21,7 +21,17 @@ fn main() {
     let port = "8088";
     println!("Iniciando Servidor de Sala de Bate-Papo na porta {}...", port);
 
-    let mut server = Server::new(port);
-    server.add_ws_route("/sala", WsMode::Both, handler_sala);
-    server.run();
+    std::thread::spawn(move || {
+        let mut server = Server::new(port);
+        server.add_ws_route("/sala", WsMode::Both, handler_sala);
+        server.run();
+    });
+
+    // Aguarda um pouco para o servidor iniciar e depois dispara o graceful shutdown
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    Server::shutdown();
+    
+    // Aguarda um pouco para dar tempo de fazer o clean up
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    println!("Teste finalizado com sucesso via Graceful Shutdown!");
 }

@@ -123,6 +123,10 @@ impl WsHub {
                 self.unregister(id);
             }
 
+            if !crate::IS_RUNNING.load(Ordering::SeqCst) {
+                break; // Sai da thread do timer
+            }
+
             // Limpeza periodica de salas vazias
             let interval = {
                 *self.room_cleanup_interval.lock().unwrap_or_else(|p| p.into_inner())
@@ -132,6 +136,20 @@ impl WsHub {
                     cleanup_elapsed = 0;
                     self.cleanup_empty_rooms();
                 }
+            }
+        }
+    }
+
+    /// Envia pacote de encerramento (Close) para todos os clientes locais 
+    /// para garantir o Graceful Shutdown.
+    pub fn shutdown(&self) {
+        let close_frame = frame::encode_frame(Opcode::Close, &[]);
+        let shared_close: Arc<[u8]> = Arc::from(close_frame);
+        
+        for shard_mutex in self.shards.iter() {
+            let shard = shard_mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            for client in shard.clients.values() {
+                let _ = client.sender.send(Arc::clone(&shared_close));
             }
         }
     }

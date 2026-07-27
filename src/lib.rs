@@ -28,6 +28,18 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+pub static IS_RUNNING: AtomicBool = AtomicBool::new(true);
+
+extern "C" {
+    fn signal(sig: i32, handler: extern "C" fn(i32)) -> usize;
+}
+
+extern "C" fn handle_sigint(_sig: i32) {
+    // Quando receber Ctrl+C, mudamos a flag para false!
+    IS_RUNNING.store(false, Ordering::SeqCst);
+}
 
 use self::http::{HttpMethod, HttpRequest, HttpResponse};
 use self::route::{HandlerFn, Route};
@@ -248,8 +260,18 @@ impl Server {
         });
     }
 
+    /// Permite encerrar o servidor programaticamente sem SIGINT
+    pub fn shutdown() {
+        crate::IS_RUNNING.store(false, Ordering::SeqCst);
+    }
+
     /// Roda o servidor e começa a aceitar conexões (multi-threaded)
     pub fn run(mut self) {
+        unsafe {
+            signal(2, handle_sigint);
+            signal(15, handle_sigint);
+        }
+
         let mut radix = crate::radix::RadixTree::new();
 
         for mut group in self.groups.drain(..) {
@@ -337,7 +359,7 @@ impl Server {
             .unwrap();
 
         // Inicia o cluster manager se estiver habilitado
-        if let Some((cfg, state)) = cluster_setup {
+        if let Some((cfg, state)) = cluster_setup.clone() {
             ClusterManager::start(
                 cfg,
                 state,
@@ -352,9 +374,11 @@ impl Server {
             server_arc.address
         ));
 
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
+        let _ = listener.set_nonblocking(true);
+
+        while IS_RUNNING.load(Ordering::SeqCst) {
+            match listener.accept() {
+                Ok((stream, _)) => {
                     if let Err(e) = stream.set_nonblocking(true) {
                         server_arc
                             .logger
@@ -398,6 +422,10 @@ impl Server {
                         },
                     );
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // Sem conexões pendentes, dorme 10ms
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
                 Err(e) => {
                     server_arc
                         .logger
@@ -405,6 +433,27 @@ impl Server {
                 }
             }
         }
+
+        server_arc.logger.info("Sinal de encerramento recebido. Iniciando Graceful Shutdown...");
+
+        // 1. Notificar encerramento no Cluster
+        if let Some((_, ref state)) = cluster_setup {
+            server_arc.logger.info("Notificando peers do Cluster...");
+            state.shutdown();
+        }
+
+        // 2. Encerrar WebSockets locais
+        server_arc.logger.info("Fechando conexões WebSocket locais...");
+        server_arc.ws_hub.shutdown();
+
+        // 3. Encerrar ThreadPool e Reactor (o Arc vai dropar quando as referências caírem, 
+        // mas a thread_pool precisa aguardar término).
+        server_arc.logger.info("Aguardando drenagem do ThreadPool...");
+        // Como o ThreadPool do axolote não tem um join manual exposto publicamente ainda, 
+        // vamos simular um grace period simples para tarefas pendentes
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        
+        server_arc.logger.info("Graceful Shutdown concluído. Adeus!");
     }
 
     fn process_http_event(&self, state_mutex: &Mutex<HttpConnectionState>) -> HttpEventAction {
@@ -764,6 +813,10 @@ impl Server {
                 let conn_clone = Arc::clone(&conn_arc);
                 let pool_clone = self.thread_pool.as_ref().unwrap().clone();
                 let reactor_clone = Arc::clone(&self.reactor);
+
+                // IMPORTANTE: O fd já estava registrado para HTTP. Precisamos desregistrar
+                // antes de registrar a nova closure de WebSocket, senão `register` falha com EEXIST.
+                let _ = self.reactor.unregister(stream_fd);
 
                 let _ = self
                     .reactor

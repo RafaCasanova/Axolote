@@ -278,7 +278,34 @@ impl ClusterState {
                 }
             }
         }
-
         dead
+    }
+
+    /// Executa o Graceful Shutdown informando os peers que este nó está saindo da rede.
+    pub fn shutdown(&self) {
+        let env = S2sEnvelope {
+            msg_type: super::envelope::S2sMessageType::Leave,
+            node_origin: self.node_id,
+            message_seq: self.next_seq(),
+            target: Vec::new(),
+            payload: Vec::new(),
+        };
+        self.forward_to_all_peers(&env);
+    }
+
+    /// Remove um peer do cluster manualmente
+    pub fn remove_peer(&self, node_id: u8) {
+        let mut state = self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        state.peers.remove(&node_id);
+        
+        let keys_to_remove: Vec<u64> = state
+            .presence
+            .iter()
+            .filter(|(_, &n)| n == node_id)
+            .map(|(&k, _)| k)
+            .collect();
+        for k in keys_to_remove {
+            state.presence.remove(&k);
+        }
     }
 }

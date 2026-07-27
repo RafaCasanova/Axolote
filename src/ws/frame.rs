@@ -55,13 +55,29 @@ pub struct WsFrame {
     pub payload: Vec<u8>,
 }
 
+fn read_exact_retry(stream: &mut TcpStream, buf: &mut [u8]) -> std::io::Result<()> {
+    let mut read_bytes = 0;
+    while read_bytes < buf.len() {
+        match stream.read(&mut buf[read_bytes..]) {
+            Ok(0) => return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "EOF")),
+            Ok(n) => read_bytes += n,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::Interrupted => {
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
 /// Lê um frame WebSocket completo do TcpStream
 /// Retorna None se a conexão foi encerrada, ocorreu um erro, ou o frame excedeu max_size
 /// Le um frame WebSocket da stream.
 pub fn read_frame(stream: &mut TcpStream, max_size: usize, require_mask: bool) -> Option<WsFrame> {
     // Byte 1: FIN bit + opcode
     let mut header = [0u8; 2];
-    if stream.read_exact(&mut header).is_err() {
+    if let Err(e) = read_exact_retry(stream, &mut header) {
+        println!("FAIL: header read error: {:?}", e);
         return None;
     }
 
@@ -90,46 +106,40 @@ pub fn read_frame(stream: &mut TcpStream, max_size: usize, require_mask: bool) -
     // Extended payload length
     if payload_len == 126 {
         let mut buf = [0u8; 2];
-        if stream.read_exact(&mut buf).is_err() {
+        if read_exact_retry(stream, &mut buf).is_err() {
             return None;
         }
         payload_len = u16::from_be_bytes(buf) as u64;
     } else if payload_len == 127 {
         let mut buf = [0u8; 8];
-        if stream.read_exact(&mut buf).is_err() {
+        if read_exact_retry(stream, &mut buf).is_err() {
             return None;
         }
         payload_len = u64::from_be_bytes(buf);
     }
 
-    // Proteção contra frames gigantes (Feature 4: Max Message Size)
-    if payload_len > max_size as u64 {
+    if max_size > 0 && payload_len > (max_size as u64) {
         return None;
     }
 
-    // Masking key (4 bytes, somente se masked == true)
-    let mask_key = if masked {
-        let mut key = [0u8; 4];
-        if stream.read_exact(&mut key).is_err() {
-            return None;
-        }
-        Some(key)
-    } else {
-        None
-    };
-
-    // Payload data
-    let mut payload = vec![0u8; payload_len as usize];
-    if !payload.is_empty() {
-        if stream.read_exact(&mut payload).is_err() {
+    // Mask key
+    let mut mask_key = [0u8; 4];
+    if masked {
+        if read_exact_retry(stream, &mut mask_key).is_err() {
             return None;
         }
     }
 
+    // Payload
+    let mut payload = vec![0u8; payload_len as usize];
+    if read_exact_retry(stream, &mut payload).is_err() {
+        return None;
+    }
+
     // Unmask payload (XOR com a chave rotativa de 4 bytes)
-    if let Some(key) = mask_key {
+    if masked {
         for i in 0..payload.len() {
-            payload[i] ^= key[i % 4];
+            payload[i] ^= mask_key[i % 4];
         }
     }
 

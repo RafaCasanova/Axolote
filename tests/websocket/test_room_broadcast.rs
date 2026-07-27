@@ -13,8 +13,13 @@ fn handler_sala(conn: &mut WsConnection, hub: WsHub) {
 
     conn.on_message(|_id, hub, msg| {
         if let WsMessage::Text(text) = msg {
+            println!("[Servidor] Recebeu mensagem: {}", text);
             hub.broadcast_to_room("teste_sala", &text);
         }
+    });
+
+    conn.on_close(|id, _hub, code| {
+        println!("[Servidor] Conexão {} fechada com código {:?}", id, code);
     });
 }
 

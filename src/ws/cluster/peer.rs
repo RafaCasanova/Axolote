@@ -258,6 +258,10 @@ fn process_incoming_envelope(
                 cluster_state.forward_to_all_peers_except(&env, from_node_id);
             }
         }
+        S2sMessageType::Leave => {
+            cluster_state.remove_peer(env.node_origin);
+            cluster_state.forward_to_all_peers_except(&env, from_node_id);
+        }
     }
 }
 
