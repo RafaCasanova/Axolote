@@ -13,7 +13,10 @@ pub struct CorsConfig {
 }
 
 impl Default for CorsConfig {
-    /// Cria uma configuração relaxada (permite tudo) para agilizar o desenvolvimento.
+    /// Cria uma configuracao relaxada (permite tudo) para agilizar o desenvolvimento.
+    /// NOTA: allow_credentials e false por padrao porque a spec CORS proibe
+    /// combinar Access-Control-Allow-Origin: * com Access-Control-Allow-Credentials: true.
+    /// Para usar credenciais, chame .with_credentials(true) junto com origens explicitas.
     fn default() -> Self {
         CorsConfig {
             allow_origins: vec!["*".to_string()],
@@ -28,7 +31,7 @@ impl Default for CorsConfig {
             allow_headers: vec!["*".to_string()],
             expose_headers: vec![],
             max_age: Some(86400),
-            allow_credentials: true,
+            allow_credentials: false,
         }
     }
 }
@@ -71,18 +74,20 @@ impl CorsConfig {
         self
     }
 
-    /// Injeta os cabeçalhos de CORS em uma resposta final (GET, POST, etc)
+    /// Injeta os cabecalhos de CORS em uma resposta final (GET, POST, etc)
     pub fn apply_to_response(&self, req: &HttpRequest, mut res: HttpResponse) -> HttpResponse {
         let req_origin = req.headers.get("origin").map(|s| s.as_str()).unwrap_or("*");
+        let is_wildcard = self.allow_origins.contains(&"*".to_string());
 
-        if self.allow_origins.contains(&"*".to_string()) {
+        if is_wildcard {
             res.headers.push(("Access-Control-Allow-Origin".to_string(), "*".to_string()));
         } else if self.allow_origins.iter().any(|o| o == req_origin) {
             res.headers.push(("Access-Control-Allow-Origin".to_string(), req_origin.to_string()));
             res.headers.push(("Vary".to_string(), "Origin".to_string()));
         }
 
-        if self.allow_credentials {
+        // RFC: Allow-Credentials: true so e valido com origem explicita, nunca com *
+        if self.allow_credentials && !is_wildcard {
             res.headers.push(("Access-Control-Allow-Credentials".to_string(), "true".to_string()));
         }
 
@@ -93,24 +98,25 @@ impl CorsConfig {
         res
     }
 
-    /// Lida com a requisição de pré-vôo (OPTIONS) enviada pelos navegadores.
+    /// Lida com a requisicao de pre-voo (OPTIONS) enviada pelos navegadores.
     pub fn handle_preflight(&self, req: &HttpRequest) -> HttpResponse {
         let mut res = HttpResponse::new(204, "No Content", "");
 
         let req_origin = req.headers.get("origin").map(|s| s.as_str()).unwrap_or("*");
+        let is_wildcard = self.allow_origins.contains(&"*".to_string());
 
         // Tratamento da Origem
-        if self.allow_origins.contains(&"*".to_string()) {
+        if is_wildcard {
             res.headers.push(("Access-Control-Allow-Origin".to_string(), "*".to_string()));
         } else if self.allow_origins.iter().any(|o| o == req_origin) {
             res.headers.push(("Access-Control-Allow-Origin".to_string(), req_origin.to_string()));
             res.headers.push(("Vary".to_string(), "Origin".to_string()));
         }
 
-        // Métodos permitidos
+        // Metodos permitidos
         res.headers.push(("Access-Control-Allow-Methods".to_string(), self.allow_methods.join(", ")));
 
-        // Cabeçalhos permitidos
+        // Cabecalhos permitidos
         if self.allow_headers.contains(&"*".to_string()) {
             if let Some(req_headers) = req.headers.get("access-control-request-headers") {
                 res.headers.push(("Access-Control-Allow-Headers".to_string(), req_headers.to_string()));
@@ -126,7 +132,8 @@ impl CorsConfig {
             res.headers.push(("Access-Control-Max-Age".to_string(), max_age.to_string()));
         }
 
-        if self.allow_credentials {
+        // RFC: Allow-Credentials: true so e valido com origem explicita, nunca com *
+        if self.allow_credentials && !is_wildcard {
             res.headers.push(("Access-Control-Allow-Credentials".to_string(), "true".to_string()));
         }
 

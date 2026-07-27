@@ -657,18 +657,7 @@ impl Server {
         match fs::read(path) {
             Ok(bytes) => {
                 let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                let mime = match ext {
-                    "html" | "htm" => "text/html",
-                    "css" => "text/css",
-                    "js" => "application/javascript",
-                    "json" => "application/json",
-                    "png" => "image/png",
-                    "jpg" | "jpeg" => "image/jpeg",
-                    "svg" => "image/svg+xml",
-                    "wasm" => "application/wasm",
-                    "txt" => "text/plain",
-                    _ => "application/octet-stream",
-                };
+                let mime = crate::http::static_serve::get_mime_type(ext);
                 
                 let mut res = HttpResponse::new(200, "OK", "");
                 res.body = bytes;

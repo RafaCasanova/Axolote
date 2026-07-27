@@ -162,7 +162,7 @@ Na fase de conexão, os nós trocam pacotes minúsculos de 1 byte (Node ID) ou 2
 | **Message Type** | `u8` | `1` para PresenceUpdate, `2` para Broadcast, `3` para PrivateMessage, `4` para S2sPing, `5` para S2sPong |
 | **Node Origin** | `u8` | ID do nó de origem da acao |
 | **Message Seq** | `u64` | Sequencia incremental de mensagens para deduplicacao |
-| **Target Length** | `u32` | Tamanho do campo Target em bytes |
+| **Target Length** | `u16` | Tamanho do campo Target em bytes |
 | **Target** | `Vec<u8>` | Destinatário da mensagem (ex: nome da sala, id de conexão) |
 | **Payload Length** | `u32` | Tamanho do payload subsequente em bytes |
 | **Payload** | `Vec<u8>` | Bytes de dados do payload |

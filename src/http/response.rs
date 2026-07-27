@@ -28,7 +28,8 @@ impl IntoBody for (Vec<u8>, String) {
     }
 }
 
-// A implementação para structs customizadas é gerada automaticamente pelo #[axolote_json]
+// Para retornar structs como JSON, utilize .to_json() manualmente:
+// HttpResponse::ok(minha_struct.to_json()).with_header("Content-Type", "application/json")
 
 /// Estrutura que encapsula a resposta HTTP (struct Write)
 /// Todo handler obrigatoriamente retorna essa struct.
