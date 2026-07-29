@@ -78,8 +78,8 @@ fn main() {
     
     // Node 1
     thread::spawn(move || {
-        let mut server = Server::new("8086");
-        let config = ClusterConfig::new(1, "9006", vec!["127.0.0.1:9007".to_string()]);
+        let mut server = Server::new("8087");
+        let config = ClusterConfig::new(1, "9007", vec!["127.0.0.1:9008".to_string()]);
         server.enable_cluster(config);
         server.add_ws_route("/chat", WsMode::Both, chat_handler);
         server.run();
@@ -87,8 +87,8 @@ fn main() {
     
     // Node 2
     thread::spawn(move || {
-        let mut server = Server::new("8087");
-        let config = ClusterConfig::new(2, "9007", vec!["127.0.0.1:9006".to_string()]);
+        let mut server = Server::new("8088");
+        let config = ClusterConfig::new(2, "9008", vec!["127.0.0.1:9007".to_string()]);
         server.enable_cluster(config);
         server.add_ws_route("/chat", WsMode::Both, chat_handler);
         server.run();
@@ -97,7 +97,7 @@ fn main() {
     thread::sleep(Duration::from_secs(2)); // wait for startup and S2S connect
     
     // Client connects to Node 1 and joins 'test_room'
-    let mut c1 = create_client("8086");
+    let mut c1 = create_client("8087");
     
     // Espera ate o TEST_HUB ser populado pelo chat_handler (que roda em outra thread)
     let hub1 = loop {

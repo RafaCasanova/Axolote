@@ -27,7 +27,7 @@ extern "C" {
     fn close(fd: i32) -> i32;
 }
 
-pub type EventCallback = Box<dyn Fn(u32) + Send + Sync + 'static>;
+pub type EventCallback = Box<dyn Fn(u32, u64) + Send + Sync + 'static>;
 
 /// Entrada interna do Reactor, associa a callback à sua geração.
 /// A geração é incrementada a cada novo register() no mesmo fd, permitindo
@@ -62,21 +62,12 @@ impl Reactor {
     /// condition por reutilização de fd pelo kernel.
     pub fn register<F>(&self, fd: RawFd, interest: u32, callback: F) -> Result<u64, std::io::Error>
     where
-        F: Fn(u32) + Send + Sync + 'static,
+        F: Fn(u32, u64) + Send + Sync + 'static,
     {
-        let mut event = EpollEvent {
-            events: interest | EPOLLET,
-            data: fd as u64,
-        };
-
-        let res = unsafe { epoll_ctl(self.epoll_fd, EPOLL_CTL_ADD, fd, &mut event) };
-        if res < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-
+        // 1. Insere no HashMap PRIMEIRO para evitar Race Condition.
+        // Se epoll_ctl rodasse antes, epoll_wait poderia disparar em outra thread 
+        // ANTES de inserirmos a callback no HashMap, perdendo o evento (EPOLLONESHOT) para sempre.
         let gen = if let Ok(mut map) = self.entries.lock() {
-            // Incrementa a geração sempre que registramos esse fd novamente.
-            // Se o fd for novo, a geração começa em 1.
             let next_gen = map.get(&fd).map(|e| e.generation + 1).unwrap_or(1);
             map.insert(fd, CallbackEntry {
                 callback: Box::new(callback),
@@ -84,8 +75,26 @@ impl Reactor {
             });
             next_gen
         } else {
-            1
+            return Err(std::io::Error::new(std::io::ErrorKind::Other, "Falha ao obter lock do reactor"));
         };
+
+        // 2. Só então adiciona no epoll
+        let mut event = EpollEvent {
+            events: interest | EPOLLET,
+            data: fd as u64,
+        };
+
+        let res = unsafe { epoll_ctl(self.epoll_fd, EPOLL_CTL_ADD, fd, &mut event) };
+        if res < 0 {
+            let err = std::io::Error::last_os_error();
+            // Desfaz a inserção no HashMap em caso de falha no SO
+            if let Ok(mut map) = self.entries.lock() {
+                if map.get(&fd).map(|e| e.generation == gen).unwrap_or(false) {
+                    map.remove(&fd);
+                }
+            }
+            return Err(err);
+        }
 
         Ok(gen)
     }
@@ -161,16 +170,16 @@ impl Reactor {
             let ev = &events[i];
             let fd = ev.data as RawFd;
 
-            let callback_opt = {
+            let cb_info = {
                 if let Ok(map) = self.entries.lock() {
-                    map.get(&fd).map(|e| e.callback.as_ref() as *const (dyn Fn(u32) + Send + Sync))
+                    map.get(&fd).map(|e| (e.callback.as_ref() as *const (dyn Fn(u32, u64) + Send + Sync), e.generation))
                 } else {
                     None
                 }
             };
 
-            if let Some(cb_ptr) = callback_opt {
-                unsafe { (*cb_ptr)(ev.events); }
+            if let Some((cb_ptr, gen)) = cb_info {
+                unsafe { (*cb_ptr)(ev.events, gen); }
             }
         }
 

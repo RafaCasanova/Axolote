@@ -12,7 +12,7 @@ use std::net::TcpStream;
 fn main() {
     // 1. Inicia o servidor em uma thread de background
     thread::spawn(|| {
-        let mut server = Server::new("8081");
+        let mut server = Server::new("8089");
 
         // Rota Aberta (Sem segurança)
         server.add_ws_route("/ws/public", WsMode::Both, |conn: &mut WsConnection, _hub: WsHub| {
@@ -38,7 +38,7 @@ fn main() {
             conn.on_message(|_, _, _| {});
         });
 
-        println!("Servidor de Teste Extremo Iniciado na porta 8081...");
+        println!("Servidor de Teste Extremo Iniciado na porta 8089...");
         server.run();
     });
 
@@ -53,10 +53,10 @@ fn main() {
 
     // Helper para atirar requests
     let send_raw_request = |path: &str, extra_headers: &str| -> String {
-        let mut stream = TcpStream::connect("127.0.0.1:8081").expect("Falha ao conectar");
+        let mut stream = TcpStream::connect("127.0.0.1:8089").expect("Falha ao conectar");
         let req = format!(
             "GET {} HTTP/1.1\r\n\
-            Host: 127.0.0.1:8081\r\n\
+            Host: 127.0.0.1:8089\r\n\
             Connection: Upgrade\r\n\
             Upgrade: websocket\r\n\
             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\

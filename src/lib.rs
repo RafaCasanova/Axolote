@@ -379,57 +379,53 @@ impl Server {
         while IS_RUNNING.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((stream, _)) => {
+                    let stream_fd = stream.as_raw_fd();
                     if let Err(e) = stream.set_nonblocking(true) {
-                        server_arc
-                            .logger
-                            .error(&format!("Falha set_nonblocking: {}", e));
+                        server_arc.logger.error(&format!("Falha ao configurar non-blocking: {}", e));
                         continue;
                     }
 
-                    let stream_fd = stream.as_raw_fd();
-                    let state = Arc::new(Mutex::new(HttpConnectionState {
+                    let state = HttpConnectionState {
                         stream,
                         raw_data: Vec::new(),
-                    }));
+                    };
 
-                    let reactor_clone = Arc::clone(&server_arc.reactor);
-                    let srv = Arc::clone(&server_arc);
-                    let pool_clone = Arc::clone(server_arc.thread_pool.as_ref().unwrap());
+                    let state_arc = Arc::new(Mutex::new(state));
+                    let pool_clone = server_arc.thread_pool.as_ref().unwrap().clone();
+                    let s = Arc::clone(&server_arc);
+                    let r = Arc::clone(&server_arc.reactor);
 
-                    // Arc<AtomicU64> compartilhado entre o escopo externo (onde registramos a
-                    // geração retornada por register()) e o closure movido (que precisa dela
-                    // para chamar unregister_generation corretamente).
-                    let gen_holder = Arc::new(std::sync::atomic::AtomicU64::new(0));
-                    let gen_holder_inner = Arc::clone(&gen_holder);
-
-                    if let Ok(gen) = server_arc.reactor.register(
+                    if let Ok(_gen) = server_arc.reactor.register(
                         stream_fd,
                         crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT,
-                        move |_| {
-                            let s = Arc::clone(&srv);
-                            let st = Arc::clone(&state);
-                            let r = Arc::clone(&reactor_clone);
-                            let g = gen_holder_inner.load(Ordering::SeqCst);
+                        move |_, g| {
+                            let st = Arc::clone(&state_arc);
+                            let s = Arc::clone(&s);
+                            let r = Arc::clone(&r);
 
                             let _ = pool_clone.execute(move || {
                                 let action = s.process_http_event(&st);
                                 match action {
                                     HttpEventAction::KeepAlive => {
-                                        let _ = r.modify(
-                                            stream_fd,
-                                            crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT,
-                                        );
+                                        let _ = r.modify(stream_fd, crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT);
                                     }
                                     HttpEventAction::Close => {
                                         // Usa unregister_generation: só remove se ainda for nossa geração.
                                         let _ = r.unregister_generation(stream_fd, g);
                                     }
-                                    HttpEventAction::Upgraded => {} // WS ja registrou no reactor
+                                    HttpEventAction::Upgraded => {
+                                        // WS já registrou sua própria closure em um FD clonado.
+                                        // Precisamos desregistrar o FD original do HTTP para limpar a memória e fechar o FD duplicado.
+                                        // Como ainda seguramos o `st` (TcpStream), o FD não foi fechado e não há risco de conflito.
+                                        let _ = r.unregister(stream_fd);
+                                    }
                                 }
                             });
                         },
                     ) {
-                        gen_holder.store(gen, Ordering::SeqCst);
+                        // Registrado com sucesso. O closure recebe `g` via argumento.
+                    } else {
+                        server_arc.logger.error("Falha ao registrar fd no epoll");
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -824,18 +820,9 @@ impl Server {
                 let pool_clone = self.thread_pool.as_ref().unwrap().clone();
                 let reactor_clone = Arc::clone(&self.reactor);
 
-                // IMPORTANTE: O fd já estava registrado para HTTP. Precisamos desregistrar
-                // antes de registrar a nova closure de WebSocket, senão `register` falha com EEXIST.
-                let _ = self.reactor.unregister(stream_fd);
-
-                // Arc<AtomicU64> para compartilhar a geração entre o escopo externo e o closure WS.
-                let gen_holder = Arc::new(std::sync::atomic::AtomicU64::new(0));
-                let gen_holder_inner = Arc::clone(&gen_holder);
-
-                if let Ok(gen) = self.reactor.register(stream_fd, EPOLLIN | EPOLLONESHOT, move |_| {
+                if let Ok(_gen) = self.reactor.register(stream_fd, EPOLLIN | EPOLLONESHOT, move |_, g| {
                         let c = Arc::clone(&conn_clone);
                         let r = Arc::clone(&reactor_clone);
-                        let g = gen_holder_inner.load(Ordering::SeqCst);
 
                         let _ = pool_clone.execute(move || {
                             let keep_alive = {
@@ -851,7 +838,7 @@ impl Server {
                             }
                         });
                     }) {
-                    gen_holder.store(gen, Ordering::SeqCst);
+                        // Registration successful. Callback gets `g`.
                 }
             }
             None => {

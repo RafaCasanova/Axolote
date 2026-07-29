@@ -115,7 +115,7 @@ pub fn spawn_peer_threads(
     let _ = reactor.register(
         stream_fd,
         crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT,
-        move |_| {
+        move |_, _| {
             let st = Arc::clone(&state);
             let r = Arc::clone(&reactor_clone);
             let cs = cluster_state.clone();

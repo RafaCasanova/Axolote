@@ -68,8 +68,8 @@ fn main() {
     
     // Inicia Node 1
     thread::spawn(|| {
-        let mut server = Server::new("8081");
-        let mut config = ClusterConfig::new(1, "9001", vec!["127.0.0.1:9002".to_string()]);
+        let mut server = Server::new("8084");
+        let mut config = ClusterConfig::new(1, "9004", vec!["127.0.0.1:9005".to_string()]);
         config.heartbeat_interval_secs = 1;
         server.enable_cluster(config);
         server.add_ws_route("/chat", WsMode::Both, chat_handler);
@@ -78,8 +78,8 @@ fn main() {
 
     // Inicia Node 2
     thread::spawn(|| {
-        let mut server = Server::new("8082");
-        let mut config = ClusterConfig::new(2, "9002", vec!["127.0.0.1:9003".to_string()]);
+        let mut server = Server::new("8085");
+        let mut config = ClusterConfig::new(2, "9005", vec!["127.0.0.1:9006".to_string()]);
         config.heartbeat_interval_secs = 1;
         server.enable_cluster(config);
         server.add_ws_route("/chat", WsMode::Both, chat_handler);
@@ -88,8 +88,8 @@ fn main() {
 
     // Inicia Node 3
     thread::spawn(|| {
-        let mut server = Server::new("8083");
-        let mut config = ClusterConfig::new(3, "9003", vec!["127.0.0.1:9001".to_string()]);
+        let mut server = Server::new("8086");
+        let mut config = ClusterConfig::new(3, "9006", vec!["127.0.0.1:9004".to_string()]);
         config.heartbeat_interval_secs = 1;
         server.enable_cluster(config);
         server.add_ws_route("/chat", WsMode::Both, chat_handler);
@@ -99,8 +99,8 @@ fn main() {
     println!("[TESTE] Aguardando formação do Cluster Gossip Mesh (3 segundos)...");
     thread::sleep(Duration::from_secs(3));
 
-    let mut client1 = create_client("8081");
-    let mut client3 = create_client("8083");
+    let mut client1 = create_client("8084");
+    let mut client3 = create_client("8086");
 
     println!("[TESTE] Client 1 (Node 1) e Client 3 (Node 3) conectados.");
     

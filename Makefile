@@ -16,7 +16,7 @@ HTTP_TESTS = test_server test_ping test_radix
 HTTP_EXAMPLES = hello_world path_and_query_params routes_grouping_middleware server_advanced_config http_request_logger background_task_logger json_rest_api multipart_form_data basic_routing groups_middleware query_parameters cors_rest_api static_server
 
 # Lista de testes WebSocket
-WS_TESTS = test_room_broadcast test_cluster_s2s test_cluster_gossip_mesh test_security_extreme test_room_cleanup
+WS_TESTS = test_room_broadcast test_cluster_s2s test_cluster_gossip_mesh test_security_extreme test_room_cleanup test_stress_fd_reuse test_ws_fragmentation_stress
 
 # Lista de exemplos WebSocket
 # Lista de exemplos WebSocket (em docs/websocket/examples/)
