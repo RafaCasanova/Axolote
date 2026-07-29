@@ -115,27 +115,31 @@ pub fn spawn_peer_threads(
     let _ = reactor.register(
         stream_fd,
         crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT,
-        move |_, _| {
-            let st = Arc::clone(&state);
-            let r = Arc::clone(&reactor_clone);
-            let cs = cluster_state.clone();
-            let h = hub.clone();
+        move |_, g| {
+            let st_exec = Arc::clone(&state);
+            let r_exec = Arc::clone(&reactor_clone);
+            let cs_exec = cluster_state.clone();
+            let h_exec = hub.clone();
 
-            let _ = pool.execute(move || {
-                let action = process_s2s_event(&st, &cs, &h, remote_node_id);
+            if let Err(_) = pool.execute(move || {
+                let action = process_s2s_event(&st_exec, &cs_exec, &h_exec, remote_node_id);
                 match action {
                     S2sEventAction::KeepAlive => {
-                        let _ = r.modify(
+                        let _ = r_exec.modify(
                             stream_fd,
                             crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT,
                         );
                     }
                     S2sEventAction::Close => {
-                        let _ = r.unregister(stream_fd);
-                        cs.unregister_peer(remote_node_id);
+                        let _ = r_exec.unregister_generation(stream_fd, g);
+                        cs_exec.unregister_peer(remote_node_id);
                     }
                 }
-            });
+            }) {
+                // ThreadPool exhausted
+                let _ = reactor_clone.unregister_generation(stream_fd, g);
+                cluster_state.unregister_peer(remote_node_id);
+            }
         },
     );
 

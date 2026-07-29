@@ -403,24 +403,36 @@ impl Server {
                             let s = Arc::clone(&s);
                             let r = Arc::clone(&r);
 
-                            let _ = pool_clone.execute(move || {
-                                let action = s.process_http_event(&st);
+                            let st_exec = Arc::clone(&st);
+                            let s_exec = Arc::clone(&s);
+                            let r_exec = Arc::clone(&r);
+
+                            if let Err(_) = pool_clone.execute(move || {
+                                let action = s_exec.process_http_event(&st_exec);
                                 match action {
                                     HttpEventAction::KeepAlive => {
-                                        let _ = r.modify(stream_fd, crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT);
+                                        let _ = r_exec.modify(stream_fd, crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT);
                                     }
                                     HttpEventAction::Close => {
                                         // Usa unregister_generation: só remove se ainda for nossa geração.
-                                        let _ = r.unregister_generation(stream_fd, g);
+                                        let _ = r_exec.unregister_generation(stream_fd, g);
                                     }
                                     HttpEventAction::Upgraded => {
                                         // WS já registrou sua própria closure em um FD clonado.
                                         // Precisamos desregistrar o FD original do HTTP para limpar a memória e fechar o FD duplicado.
                                         // Como ainda seguramos o `st` (TcpStream), o FD não foi fechado e não há risco de conflito.
-                                        let _ = r.unregister(stream_fd);
+                                        let _ = r_exec.unregister(stream_fd);
                                     }
                                 }
-                            });
+                            }) {
+                                // Rejeição por sobrecarga: Fila do ThreadPool cheia
+                                if let Ok(mut state) = st.lock() {
+                                    use std::io::Write;
+                                    let msg = "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+                                    let _ = state.stream.write_all(msg.as_bytes());
+                                }
+                                let _ = r.unregister_generation(stream_fd, g);
+                            }
                         },
                     ) {
                         // Registrado com sucesso. O closure recebe `g` via argumento.
@@ -824,19 +836,26 @@ impl Server {
                         let c = Arc::clone(&conn_clone);
                         let r = Arc::clone(&reactor_clone);
 
-                        let _ = pool_clone.execute(move || {
+                        let c_exec = Arc::clone(&c);
+                        let r_exec = Arc::clone(&r);
+
+                        if let Err(_) = pool_clone.execute(move || {
                             let keep_alive = {
-                                let mut c_guard = c.lock().unwrap();
+                                let mut c_guard = c_exec.lock().unwrap();
                                 c_guard.process_next_frame()
                             };
 
                             if keep_alive {
-                                let _ = r.modify(stream_fd, EPOLLIN | EPOLLONESHOT);
+                                let _ = r_exec.modify(stream_fd, EPOLLIN | EPOLLONESHOT);
                             } else {
                                 // Usa unregister_generation para não danificar uma conexão nova no mesmo fd.
-                                let _ = r.unregister_generation(stream_fd, g);
+                                let _ = r_exec.unregister_generation(stream_fd, g);
                             }
-                        });
+                        }) {
+                            // Rejeição por sobrecarga: Fila do ThreadPool cheia
+                            // Para WS já estabelecido, não podemos mandar 503, apenas fechar a conexão.
+                            let _ = r.unregister_generation(stream_fd, g);
+                        }
                     }) {
                         // Registration successful. Callback gets `g`.
                 }
