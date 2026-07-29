@@ -29,9 +29,19 @@ extern "C" {
 
 pub type EventCallback = Box<dyn Fn(u32) + Send + Sync + 'static>;
 
+/// Entrada interna do Reactor, associa a callback à sua geração.
+/// A geração é incrementada a cada novo register() no mesmo fd, permitindo
+/// que um unregister() atrasado (vindo de uma conexão antiga já fechada)
+/// não remova acidentalmente a callback de uma conexão nova que reutilizou o mesmo fd.
+struct CallbackEntry {
+    callback: EventCallback,
+    generation: u64,
+}
+
 pub struct Reactor {
     epoll_fd: RawFd,
-    callbacks: Arc<Mutex<HashMap<RawFd, EventCallback>>>,
+    /// Mapeia fd -> (callback, geração atual).
+    entries: Arc<Mutex<HashMap<RawFd, CallbackEntry>>>,
 }
 
 impl Reactor {
@@ -42,11 +52,15 @@ impl Reactor {
         }
         Ok(Self {
             epoll_fd,
-            callbacks: Arc::new(Mutex::new(HashMap::new())),
+            entries: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
-    pub fn register<F>(&self, fd: RawFd, interest: u32, callback: F) -> Result<(), std::io::Error>
+    /// Registra um fd no epoll com a callback fornecida.
+    /// Retorna a geração atribuída a essa entrada — guarde-a e passe-a
+    /// para `unregister_generation` ao desregistrar, para evitar o race
+    /// condition por reutilização de fd pelo kernel.
+    pub fn register<F>(&self, fd: RawFd, interest: u32, callback: F) -> Result<u64, std::io::Error>
     where
         F: Fn(u32) + Send + Sync + 'static,
     {
@@ -60,21 +74,59 @@ impl Reactor {
             return Err(std::io::Error::last_os_error());
         }
 
-        if let Ok(mut cb_map) = self.callbacks.lock() {
-            cb_map.insert(fd, Box::new(callback));
+        let gen = if let Ok(mut map) = self.entries.lock() {
+            // Incrementa a geração sempre que registramos esse fd novamente.
+            // Se o fd for novo, a geração começa em 1.
+            let next_gen = map.get(&fd).map(|e| e.generation + 1).unwrap_or(1);
+            map.insert(fd, CallbackEntry {
+                callback: Box::new(callback),
+                generation: next_gen,
+            });
+            next_gen
+        } else {
+            1
+        };
+
+        Ok(gen)
+    }
+
+    /// Desregistra o fd do epoll apenas se a geração atual do fd bater com
+    /// `expected_gen`. Isso previne que um unregister() atrasado (de uma
+    /// conexão já fechada) remova a callback de uma nova conexão que o Linux
+    /// reutilizou no mesmo fd — a causa raiz do bug de travamento intermitente.
+    pub fn unregister_generation(&self, fd: RawFd, expected_gen: u64) -> Result<(), std::io::Error> {
+        let should_remove = if let Ok(map) = self.entries.lock() {
+            map.get(&fd).map(|e| e.generation == expected_gen).unwrap_or(false)
+        } else {
+            false
+        };
+
+        if !should_remove {
+            // Geração não bate: outra conexão já tomou esse fd. Não fazemos nada.
+            return Ok(());
+        }
+
+        let mut event = EpollEvent { events: 0, data: fd as u64 };
+        unsafe { epoll_ctl(self.epoll_fd, EPOLL_CTL_DEL, fd, &mut event) };
+
+        if let Ok(mut map) = self.entries.lock() {
+            // Só remove se a geração ainda for a mesma (double-check após o lock).
+            if map.get(&fd).map(|e| e.generation == expected_gen).unwrap_or(false) {
+                map.remove(&fd);
+            }
         }
 
         Ok(())
     }
 
+    /// Desregistra o fd incondicionalmente. Use apenas em situações onde a
+    /// identidade da conexão é garantida (ex: Graceful Shutdown, upgrade HTTP→WS
+    /// onde o chamador detém o fd e sabe que ninguém mais o reutilizou).
     pub fn unregister(&self, fd: RawFd) -> Result<(), std::io::Error> {
-        let mut event = EpollEvent {
-            events: 0,
-            data: fd as u64,
-        };
+        let mut event = EpollEvent { events: 0, data: fd as u64 };
         unsafe { epoll_ctl(self.epoll_fd, EPOLL_CTL_DEL, fd, &mut event) };
-        if let Ok(mut cb_map) = self.callbacks.lock() {
-            cb_map.remove(&fd);
+        if let Ok(mut map) = self.entries.lock() {
+            map.remove(&fd);
         }
         Ok(())
     }
@@ -110,8 +162,8 @@ impl Reactor {
             let fd = ev.data as RawFd;
 
             let callback_opt = {
-                if let Ok(cb_map) = self.callbacks.lock() {
-                    cb_map.get(&fd).map(|cb| cb.as_ref() as *const (dyn Fn(u32) + Send + Sync))
+                if let Ok(map) = self.entries.lock() {
+                    map.get(&fd).map(|e| e.callback.as_ref() as *const (dyn Fn(u32) + Send + Sync))
                 } else {
                     None
                 }

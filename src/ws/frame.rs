@@ -76,8 +76,7 @@ fn read_exact_retry(stream: &mut TcpStream, buf: &mut [u8]) -> std::io::Result<(
 pub fn read_frame(stream: &mut TcpStream, max_size: usize, require_mask: bool) -> Option<WsFrame> {
     // Byte 1: FIN bit + opcode
     let mut header = [0u8; 2];
-    if let Err(e) = read_exact_retry(stream, &mut header) {
-        println!("FAIL: header read error: {:?}", e);
+    if read_exact_retry(stream, &mut header).is_err() {
         return None;
     }
 

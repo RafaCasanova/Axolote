@@ -19,12 +19,16 @@ HTTP_EXAMPLES = hello_world path_and_query_params routes_grouping_middleware ser
 WS_TESTS = test_room_broadcast test_cluster_s2s test_cluster_gossip_mesh test_security_extreme test_room_cleanup
 
 # Lista de exemplos WebSocket
-WS_EXAMPLES = basic_websocket secure_handshake_auth websocket_token_auth broadcast_chat private_chat custom_connection_id test_passive_client test_active_client test_pm_server test_pm_bob test_pm_eve test_pm_alice cluster_simple cluster_complex
+# Lista de exemplos WebSocket (em docs/websocket/examples/)
+WS_EXAMPLES = basic_websocket secure_handshake_auth websocket_token_auth broadcast_chat private_chat custom_connection_id
+
+# Exemplos/ferramentas manuais de WS (em tests/websocket/ — não fazem parte do CI automatizado)
+WS_MANUAL = test_passive_client test_active_client test_pm_server test_pm_bob test_pm_eve test_pm_alice cluster_simple cluster_complex
 
 TESTS = $(HTTP_TESTS) $(WS_TESTS)
 EXAMPLES = $(HTTP_EXAMPLES) $(WS_EXAMPLES)
 
-.PHONY: all build-lib tests examples clean $(TESTS) $(EXAMPLES)
+.PHONY: all build-lib tests examples clean $(TESTS) $(EXAMPLES) $(WS_MANUAL)
 
 all: tests examples
 
@@ -61,6 +65,11 @@ $(WS_TESTS): build-lib
 $(WS_EXAMPLES): build-lib
 	@echo "Compilando exemplo WebSocket $@..."
 	rustc -L . -g docs/websocket/examples/$@.rs --extern axolote=libaxolote.rlib -o $@
+
+## Regras para compilar ferramentas manuais WebSocket (em tests/websocket/)
+$(WS_MANUAL): build-lib
+	@echo "Compilando ferramenta manual WebSocket $@..."
+	rustc -L . -g tests/websocket/$@.rs --extern axolote=libaxolote.rlib -o $@
 
 ## Limpa os binários e bibliotecas
 clean:

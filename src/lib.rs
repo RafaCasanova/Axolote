@@ -396,13 +396,20 @@ impl Server {
                     let srv = Arc::clone(&server_arc);
                     let pool_clone = Arc::clone(server_arc.thread_pool.as_ref().unwrap());
 
-                    let _ = server_arc.reactor.register(
+                    // Arc<AtomicU64> compartilhado entre o escopo externo (onde registramos a
+                    // geração retornada por register()) e o closure movido (que precisa dela
+                    // para chamar unregister_generation corretamente).
+                    let gen_holder = Arc::new(std::sync::atomic::AtomicU64::new(0));
+                    let gen_holder_inner = Arc::clone(&gen_holder);
+
+                    if let Ok(gen) = server_arc.reactor.register(
                         stream_fd,
                         crate::reactor::EPOLLIN | crate::reactor::EPOLLONESHOT,
                         move |_| {
                             let s = Arc::clone(&srv);
                             let st = Arc::clone(&state);
                             let r = Arc::clone(&reactor_clone);
+                            let g = gen_holder_inner.load(Ordering::SeqCst);
 
                             let _ = pool_clone.execute(move || {
                                 let action = s.process_http_event(&st);
@@ -414,13 +421,16 @@ impl Server {
                                         );
                                     }
                                     HttpEventAction::Close => {
-                                        let _ = r.unregister(stream_fd);
+                                        // Usa unregister_generation: só remove se ainda for nossa geração.
+                                        let _ = r.unregister_generation(stream_fd, g);
                                     }
                                     HttpEventAction::Upgraded => {} // WS ja registrou no reactor
                                 }
                             });
                         },
-                    );
+                    ) {
+                        gen_holder.store(gen, Ordering::SeqCst);
+                    }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     // Sem conexões pendentes, dorme 10ms
@@ -818,11 +828,14 @@ impl Server {
                 // antes de registrar a nova closure de WebSocket, senão `register` falha com EEXIST.
                 let _ = self.reactor.unregister(stream_fd);
 
-                let _ = self
-                    .reactor
-                    .register(stream_fd, EPOLLIN | EPOLLONESHOT, move |_| {
+                // Arc<AtomicU64> para compartilhar a geração entre o escopo externo e o closure WS.
+                let gen_holder = Arc::new(std::sync::atomic::AtomicU64::new(0));
+                let gen_holder_inner = Arc::clone(&gen_holder);
+
+                if let Ok(gen) = self.reactor.register(stream_fd, EPOLLIN | EPOLLONESHOT, move |_| {
                         let c = Arc::clone(&conn_clone);
                         let r = Arc::clone(&reactor_clone);
+                        let g = gen_holder_inner.load(Ordering::SeqCst);
 
                         let _ = pool_clone.execute(move || {
                             let keep_alive = {
@@ -833,10 +846,13 @@ impl Server {
                             if keep_alive {
                                 let _ = r.modify(stream_fd, EPOLLIN | EPOLLONESHOT);
                             } else {
-                                let _ = r.unregister(stream_fd);
+                                // Usa unregister_generation para não danificar uma conexão nova no mesmo fd.
+                                let _ = r.unregister_generation(stream_fd, g);
                             }
                         });
-                    });
+                    }) {
+                    gen_holder.store(gen, Ordering::SeqCst);
+                }
             }
             None => {
                 self.logger.warn(
