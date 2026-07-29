@@ -10,7 +10,7 @@ MACRO_NAME = axolote_macros
 MACRO_OUT = lib$(MACRO_NAME).so
 
 # Lista de testes HTTP
-HTTP_TESTS = test_server
+HTTP_TESTS = test_server test_ping test_radix
 
 # Lista de exemplos HTTP
 HTTP_EXAMPLES = hello_world path_and_query_params routes_grouping_middleware server_advanced_config http_request_logger background_task_logger json_rest_api multipart_form_data basic_routing groups_middleware query_parameters cors_rest_api static_server
