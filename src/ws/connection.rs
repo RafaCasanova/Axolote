@@ -136,19 +136,51 @@ impl WsConnection {
         let write_closed = Arc::clone(&closed);
         
         // Thread de Escrita (lê do MPSC e escreve no TCP)
-        // Feature 6: Otimização de Stack Size (32KB em vez de 2MB)
-        let _ = thread::Builder::new()
-            .stack_size(32 * 1024)
+        // Feature 6: Otimização de Stack Size
+        // Aumentado para 64KB para evitar falhas de alocação (EINVAL) em sistemas com PTHREAD_STACK_MIN maior.
+        let spawn_res = thread::Builder::new()
+            .stack_size(64 * 1024)
             .spawn(move || {
                 for frame_bytes in rx {
-                    if *write_closed.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
-                        break; // Conexão fechada, para de escrever
+                    let mut written = 0;
+                    let mut err_occurred = false;
+                    while written < frame_bytes.len() {
+                        if *write_closed.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+                            err_occurred = true;
+                            break; // Conexão fechada, para de escrever
+                        }
+                        match write_stream.write(&frame_bytes[written..]) {
+                            Ok(0) => {
+                                err_occurred = true;
+                                break;
+                            }
+                            Ok(n) => {
+                                written += n;
+                            }
+                            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                                continue;
+                            }
+                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                std::thread::sleep(std::time::Duration::from_millis(1));
+                                continue;
+                            }
+                            Err(_) => {
+                                err_occurred = true;
+                                break;
+                            }
+                        }
                     }
-                    if write_stream.write_all(&frame_bytes).is_err() {
+                    if err_occurred {
                         break;
                     }
                 }
             });
+
+        if spawn_res.is_err() {
+            // Se falhar ao alocar a thread, limpamos a conexão para não gerar um cliente fantasma
+            hub.unregister(id);
+            return None;
+        }
 
         // NOTA (Feature 7): A thread de Ping dedicada foi removida!
         // O Timer Global no Hub cuida dos heartbeats.

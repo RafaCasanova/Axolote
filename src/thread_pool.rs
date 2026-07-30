@@ -19,7 +19,10 @@ impl ThreadPool {
     pub fn new(size: usize) -> ThreadPool {
         assert!(size > 0);
 
-        let max_queue = size * 20; // Limite da fila para backpressure
+        // Limite da fila para backpressure: 
+        // dimensionado para absorver bursts em hardware modesto sem descartar 
+        // conexoes prematuramente (minimo de 8192).
+        let max_queue = std::cmp::max(size * 2000, 8192);
         let (sender, receiver) = mpsc::sync_channel(max_queue);
         let receiver = Arc::new(Mutex::new(receiver));
 

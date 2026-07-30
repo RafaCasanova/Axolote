@@ -263,7 +263,7 @@ Além das funções principais demonstradas acima, o framework expõe nativament
 
 ### `Server`
 - `Server::new_ipv6(addr: &str)`: Semelhante ao `new`, mas faz o _bind_ forçado em um endereço IPv6 (ex: `[::1]:8080`).
-- `server.set_timeout(secs: u64)`: Altera o limite máximo de inatividade (timeout) de conexões HTTP (Padrão: 10 segundos). Conexões ociosas são expurgadas pelo _Reactor_ para poupar recursos.
+- `server.set_timeout(secs: u64)`: Altera o limite máximo de inatividade (timeout) de conexões HTTP (Padrão: 10 segundos). Conexões ociosas expiram automaticamente pelas próprias regras de timeout de leitura/escrita do socket no sistema operacional (`SO_RCVTIMEO`/`SO_SNDTIMEO`), poupando recursos sem a necessidade de varreduras ativas.
 - `server.set_not_found_handler(handler)`: Permite sobrescrever a página padrão `404 Not Found`. Útil para redirecionar todas as rotas não encontradas para o `index.html` em aplicações _Single Page Application_ (React, Vue).
 - `Server::shutdown()`: Encera o Motor (_Reactor_) e a _ThreadPool_ graciosamente. Pode ser invocado para desligamento via sinais do SO.
 - `server.get_ws_hub()`: Retorna um clone da instância global do `WsHub` para ser utilizada fora das rotas (ex: threads em background).

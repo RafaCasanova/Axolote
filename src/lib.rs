@@ -430,6 +430,7 @@ impl Server {
                                     use std::io::Write;
                                     let msg = "HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
                                     let _ = state.stream.write_all(msg.as_bytes());
+                                    let _ = state.stream.shutdown(std::net::Shutdown::Both);
                                 }
                                 let _ = r.unregister_generation(stream_fd, g);
                             }

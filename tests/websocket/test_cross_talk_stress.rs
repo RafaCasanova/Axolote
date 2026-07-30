@@ -22,9 +22,14 @@ fn create_test_client(port: &str) -> TcpStream {
     );
     stream.write_all(handshake.as_bytes()).unwrap();
 
-    let mut buf = [0u8; 4096];
-    let n = stream.read(&mut buf).unwrap();
-    let response = String::from_utf8_lossy(&buf[0..n]);
+    let mut response = String::new();
+    let mut byte = [0u8; 1];
+    while let Ok(1) = stream.read(&mut byte) {
+        response.push(byte[0] as char);
+        if response.ends_with("\r\n\r\n") {
+            break;
+        }
+    }
     assert!(response.contains("101 Switching Protocols"));
     stream
 }
