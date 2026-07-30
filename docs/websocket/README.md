@@ -135,3 +135,22 @@ A expansão em malha baseada no protocolo Gossip, bem como o cache de deduplica�
 O módulo WebSocket possui um sistema de validação atrelado à fase de *Upgrade HTTP*, permitindo checar requisições via validação da RFC, verificação de Origin (CSWSH) e autenticação via Token (Header e Query String).
 
 **Aprenda a proteger suas rotas WS:** [Documentação de Segurança (SECURITY.md)](SECURITY.md)
+
+## 7. Referência Rápida de API (Cheatsheet)
+
+Abaixo estão utilitários e funções avançadas que compõem a interface pública do Módulo WebSocket, mas que geralmente não aparecem nos fluxos básicos:
+
+### `WsConnection` (Instância Individual de Conexão)
+- `conn.send(msg: &str) -> bool`: Envia uma mensagem em texto bruto *diretamente* à conexão invocadora, pulando a camada de roteamento de salas do `WsHub`.
+- `conn.send_json<T>(data: &T) -> bool`: Serializa automaticamente a Struct fornecida para JSON e envia via frame de texto.
+- `conn.on_message_json<T, F>(cb: F)`: Registra um callback que recebe os dados já convertidos a partir de JSON diretamente na _Struct_ Rust (requer trait `FromJson`). A conexão descarta e ignora _frames_ inválidos nativamente.
+- `conn.close()`: Permite que a camada servidora force um fechamento gracioso ativo (envia o _opcode_ Close e desconecta).
+- `conn.change_id(new_id: u64)`: Altera a matrícula de identificação única do nó Socket durante o ciclo de vida da conexão. Crucial para atrelar a sessão a um ID de banco de dados após a conclusão de uma verificação de login assíncrona.
+
+### `WsHub` (Controlador Global O(1))
+- `hub.broadcast(msg: &str)`: Emissão massiva. Dispara a mensagem instantaneamente para **absolutamente todos** os clientes online no servidor, independentemente de estarem em salas.
+- `hub.broadcast_except(exclude_id, msg)`: Mesma mecânica do `broadcast`, porém ignorando um Socket específico (Supressão de Eco).
+- `hub.broadcast_json(...)`, `hub.broadcast_json_to_room(...)`: Família inteira de métodos espelhada com suporte nativo a serialização de pacotes `Struct -> JSON`.
+- `hub.kick(id: u64)`: Ferramenta administrativa; desliga e força a desconexão de um usuário específico em qualquer lugar do motor (ideal para comandos de Banning e Kicks de moderação).
+- `hub.count()` e `hub.room_count(room: &str)`: Retornam contadores processuais instantâneos. Útil para exibição de métricas como "1540 jogadores online" ou "32 na sala Lobby".
+- `hub.set_client_metadata(id, key, value)` / `hub.get_client_metadata(id, key)`: Diferente do `conn.set_metadata` (que funciona no próprio handler da conexão), estes métodos permitem que handlers externos de um usuário editem os metadados de **outro usuário**. (Ex: Administrador rodando o comando `/mutar 55`, que marca a variável `mutado=true` no Socket ID 55).

@@ -256,3 +256,22 @@ fn user_profile_handler(_req: HttpRequest) -> HttpResponse {
         .with_header("X-Powered-By", "Axolote")
 }
 ```
+
+## 10. Referência Rápida de API (Cheatsheet)
+
+Além das funções principais demonstradas acima, o framework expõe nativamente os seguintes métodos utilitários:
+
+### `Server`
+- `Server::new_ipv6(addr: &str)`: Semelhante ao `new`, mas faz o _bind_ forçado em um endereço IPv6 (ex: `[::1]:8080`).
+- `server.set_timeout(secs: u64)`: Altera o limite máximo de inatividade (timeout) de conexões HTTP (Padrão: 10 segundos). Conexões ociosas são expurgadas pelo _Reactor_ para poupar recursos.
+- `server.set_not_found_handler(handler)`: Permite sobrescrever a página padrão `404 Not Found`. Útil para redirecionar todas as rotas não encontradas para o `index.html` em aplicações _Single Page Application_ (React, Vue).
+- `Server::shutdown()`: Encera o Motor (_Reactor_) e a _ThreadPool_ graciosamente. Pode ser invocado para desligamento via sinais do SO.
+- `server.get_ws_hub()`: Retorna um clone da instância global do `WsHub` para ser utilizada fora das rotas (ex: threads em background).
+
+### `HttpRequest`
+- `req.take_body()`: Drena e retorna o payload bruto da requisição no formato `Vec<u8>`. Necessário para lidar com recebimento de arquivos binários, imagens de formulários _Multipart_, ou dados não-texto.
+
+### `HttpResponse`
+- `HttpResponse::created(body)`: Atalho sintático para o código de resposta `201 Created`.
+- `HttpResponse::redirect(location: &str)`: Atalho sintático para redirecionamento web, gera `302 Found` apontando o cabeçalho `Location` para a URL desejada.
+- `response.with_cookie_secure(key, value, path, http_only, secure)`: Função avançada para emissão de Cookies protegidos, mitigando ataques _XSS_ (`http_only`) e _Man-in-the-Middle_ (`secure`).
