@@ -4,7 +4,8 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::net::TcpStream;
-use super::crypto::{sha1, base64_encode};
+use creeptography::sha1::sha1;
+use creeptography::base64::encode as base64_encode;
 
 /// A string mágica definida pelo RFC 6455 para o cálculo do Accept
 const WS_MAGIC: &str = "258EAFA5-E914-47DA-95CA-5AB5DC786C11";

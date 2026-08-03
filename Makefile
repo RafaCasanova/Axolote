@@ -9,6 +9,10 @@ MACRO_SRC = axolote_macros/src/lib.rs
 MACRO_NAME = axolote_macros
 MACRO_OUT = lib$(MACRO_NAME).so
 
+CRYPTO_SRC = modules/creeptography/src/lib.rs
+CRYPTO_NAME = creeptography
+CRYPTO_OUT = lib$(CRYPTO_NAME).rlib
+
 # Lista de testes HTTP
 HTTP_TESTS = test_server test_ping test_radix test_http_cross_talk_stress
 
@@ -28,7 +32,7 @@ WS_MANUAL = test_passive_client test_active_client test_pm_server test_pm_bob te
 TESTS = $(HTTP_TESTS) $(WS_TESTS)
 EXAMPLES = $(HTTP_EXAMPLES) $(WS_EXAMPLES)
 
-.PHONY: all build-lib tests examples clean $(TESTS) $(EXAMPLES) $(WS_MANUAL)
+.PHONY: all build-lib tests examples clean $(TESTS) $(EXAMPLES) $(WS_MANUAL) build-crypto
 
 all: tests examples
 
@@ -37,10 +41,15 @@ build-macros:
 	@echo "Construindo procedural macros..."
 	rustc -g --crate-type=proc-macro $(MACRO_SRC) --crate-name $(MACRO_NAME) -o $(MACRO_OUT)
 
+## Compila o submódulo criptográfico (.rlib)
+build-crypto:
+	@echo "Construindo biblioteca criptográfica..."
+	rustc -g --crate-type=lib $(CRYPTO_SRC) --crate-name $(CRYPTO_NAME) -o $(CRYPTO_OUT)
+
 ## Compila o framework como biblioteca estática (.rlib)
-build-lib: build-macros
+build-lib: build-macros build-crypto
 	@echo "Construindo biblioteca do framework..."
-	rustc -g --crate-type=lib $(LIB_SRC) --crate-name $(LIB_NAME) --extern $(MACRO_NAME)=$(MACRO_OUT) -o $(LIB_OUT)
+	rustc -g --crate-type=lib $(LIB_SRC) --crate-name $(LIB_NAME) --extern $(MACRO_NAME)=$(MACRO_OUT) --extern $(CRYPTO_NAME)=$(CRYPTO_OUT) -o $(LIB_OUT)
 
 ## Compila todos os testes e exemplos
 tests: build-lib $(TESTS)

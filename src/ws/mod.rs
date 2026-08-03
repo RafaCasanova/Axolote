@@ -1,7 +1,6 @@
 /// Módulo WebSocket — Implementação nativa sobre TCP (RFC 6455)
 /// Sem dependências externas. SHA-1 e Base64 implementados na mão.
 
-pub mod crypto;
 pub mod frame;
 pub mod handshake;
 pub mod connection;

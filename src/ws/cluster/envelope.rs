@@ -76,7 +76,7 @@ impl S2sEnvelope {
         buf.extend_from_slice(&self.payload);
 
         if let Some(key) = secret {
-            let mac = crate::ws::crypto::hmac_sha1(key, &buf);
+            let mac = creeptography::sha1::hmac_sha1(key, &buf);
             buf.extend_from_slice(&mac);
         }
 
@@ -89,7 +89,7 @@ impl S2sEnvelope {
         let (actual_data, _signature_len) = if let Some(key) = secret {
             if data.len() < 20 { return None; }
             let msg_len = data.len() - 20;
-            let expected_mac = crate::ws::crypto::hmac_sha1(key, &data[..msg_len]);
+            let expected_mac = creeptography::sha1::hmac_sha1(key, &data[..msg_len]);
             let received_mac = &data[msg_len..];
             
             let mut diff = 0;

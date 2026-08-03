@@ -9,6 +9,7 @@ pub mod thread_pool;
 pub mod ws;
 
 extern crate axolote_macros;
+extern crate creeptography;
 
 pub use axolote_macros::axolote_json;
 
@@ -749,7 +750,7 @@ impl Server {
             // Verifica Token na Query String
             for (param, expected) in &guard.required_query_tokens {
                 let actual = req.query_params.get(param).map(|s| s.as_str());
-                if !actual.map_or(false, |a| crate::ws::crypto::constant_time_eq(a, expected)) {
+                if !actual.map_or(false, |a| creeptography::sha1::constant_time_eq(a, expected)) {
                     self.logger.warn(&format!(
                         "WS Security: Falha na validação do Query Token '{}'",
                         param
@@ -768,7 +769,7 @@ impl Server {
                     .get(header_name)
                     .or_else(|| req.headers.get(&header_name.to_lowercase()))
                     .map(|s| s.as_str());
-                if !actual.map_or(false, |a| crate::ws::crypto::constant_time_eq(a, expected)) {
+                if !actual.map_or(false, |a| creeptography::sha1::constant_time_eq(a, expected)) {
                     self.logger.warn(&format!(
                         "WS Security: Falha na validação do Header Token '{}'",
                         header_name

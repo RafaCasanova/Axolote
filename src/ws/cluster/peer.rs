@@ -275,7 +275,7 @@ fn process_incoming_envelope(
 pub fn send_handshake(stream: &mut TcpStream, my_node_id: u8, secret: Option<&[u8]>) -> bool {
     let mut data = vec![my_node_id];
     if let Some(key) = secret {
-        let mac = crate::ws::crypto::hmac_sha1(key, &[my_node_id]);
+        let mac = creeptography::sha1::hmac_sha1(key, &[my_node_id]);
         data.extend_from_slice(&mac);
     }
     stream.write_all(&data).is_ok()
@@ -295,7 +295,7 @@ pub fn read_handshake(stream: &mut TcpStream, secret: Option<&[u8]>) -> Option<u
         if stream.read_exact(&mut mac_buf).is_err() {
             return None; // Conexao caiu ou peer malicioso
         }
-        let expected_mac = crate::ws::crypto::hmac_sha1(key, &[node_id]);
+        let expected_mac = creeptography::sha1::hmac_sha1(key, &[node_id]);
         let mut diff = 0;
         for (x, y) in expected_mac.iter().zip(mac_buf.iter()) {
             diff |= x ^ y;
